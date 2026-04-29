@@ -1,0 +1,15 @@
+1. 로컬 PC에서 (저한테 수정 요청 → 완료되면)
+
+git add .
+git commit -m "수정 내용"
+git push origin main
+
+
+2. VM SSH에서
+
+cd ~/auto-est
+git pull origin main
+pm2 restart all
+
+
+끝입니다. 이 두 단계만 기억하시면 됩니다.

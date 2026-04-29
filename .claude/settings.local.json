@@ -41,7 +41,8 @@
       "Bash(echo \"exit: $?\")",
       "Bash(python scripts/analyze_template.py)",
       "Bash(node -e ':*)",
-      "Bash(xargs ls *)"
+      "Bash(xargs ls *)",
+      "Bash(python -c ' *)"
     ]
   }
 }
