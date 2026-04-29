@@ -52,15 +52,15 @@
         <label>템플릿 선택</label>
         <div id="tpl-list" class="tpl-list"></div>
       </div>
-      <div class="ig">
-        <div class="fg span2"><label>거래처명 / 현장명</label><input id="f-client" placeholder="예: (주)대우건설 평택오송 1공구" oninput="syncSteps()"></div>
-        <input type="hidden" id="f-site" value="스마트 안전관리 솔루션">
-        <div class="fg"><label>담당자</label><input id="f-manager" placeholder="홍길동 과장"></div>
+      <div class="ig" style="grid-template-columns:0.8fr 0.8fr 0.75fr 1fr">
+        <div class="fg span2"><label>건설사 / 현장명</label><input id="f-client" placeholder="예: (주)대우건설 평택오송 1공구" oninput="syncSteps()"></div>
+        <div class="fg"><label>현장 담당자</label><input id="f-manager" placeholder="홍길동 과장"></div>
+        <div class="fg"><label>견적서명</label><input id="f-site" placeholder="스마트 안전관리 솔루션"></div>
         <input type="hidden" id="f-contact" value="">
         <input type="hidden" id="f-date">
         <input type="hidden" id="f-valid" value="30일">
         <div class="fg full">
-          <label>특기사항 (추가 입력)</label>
+          <label>특기사항 <span style="font-size:10px;color:var(--text3);font-weight:400;letter-spacing:0;text-transform:none">— 견적서 하단에 출력됩니다</span></label>
           <div id="note-list"></div>
           <button class="note-add-btn" onclick="addNote()">+ 특기사항 추가</button>
         </div>
@@ -69,6 +69,7 @@
       <div class="sh"><div class="sh-n">02</div>품목 카탈로그</div>
       <div class="ctabs" id="cat-tabs"></div>
       <div id="tab-sets"><div class="cg" id="set-grid"></div></div>
+      <div id="tab-smart" style="display:none"><div class="cg" id="smart-grid"></div></div>
       <div id="tab-items" style="display:none">
         <div class="sbar">
           <input class="si-in" id="item-q" placeholder="품목명 · 사양 검색..." oninput="filterItems()">

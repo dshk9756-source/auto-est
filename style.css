@@ -6,9 +6,9 @@
   --sf3:     #374151;
 
   /* ─ Borders ─ */
-  --border:  rgba(255,255,255,0.07);
-  --border2: rgba(255,255,255,0.10);
-  --border3: rgba(255,255,255,0.17);
+  --border:  rgba(255,255,255,0.11);
+  --border2: rgba(255,255,255,0.16);
+  --border3: rgba(255,255,255,0.26);
 
   /* ─ Text ─ */
   --text:  #E5E7EB;
@@ -325,7 +325,9 @@ header{
 .ci-stepper{display:flex;align-items:center;gap:6px;padding-top:8px;border-top:1px solid var(--border)}
 .ci-slbl{font-size:10px;font-weight:500;color:var(--text3);flex:1;letter-spacing:.04em;text-transform:uppercase}
 .ci-members{margin-top:8px;padding-top:8px;border-top:1px solid var(--border)}
-.cim-row{display:flex;justify-content:space-between;font-size:12px;padding:3px 0}
+.cim-row{display:flex;justify-content:space-between;font-size:12px;padding:3px 0;border-top:2px solid transparent;border-bottom:2px solid transparent;transition:border-color .1s}
+.cim-row.drop-before{border-top-color:var(--pri)}
+.cim-row.drop-after{border-bottom-color:var(--pri)}
 .cim-n{color:var(--text2)}
 .cim-q{font-family:var(--mono);font-size:12px;font-weight:500;color:var(--pri);font-variant-numeric:tabular-nums}
 .mem-price-row{

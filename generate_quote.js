@@ -28,7 +28,7 @@ const JSZip   = require('jszip');
 const fs      = require('fs');
 const path    = require('path');
 
-const TEMPLATE_PATH = path.join(__dirname, 'template', '견적서 템플릿.xlsx');
+const TEMPLATE_PATH = path.join(__dirname, 'template', '견적서.xlsx');
 const NUM_FMT       = '#,##0';
 
 /* ═══════════════════════════════════════════════════════════════════════
@@ -284,7 +284,9 @@ function expandTopGroups(ws, markers, groupKeys) {
   if (groupKeys.length > 0) {
     ws.spliceRows(topGroupFirst, 0, ...Array(groupKeys.length).fill([]));
     groupKeys.forEach((name, i) => {
-      stampRow(ws, topGroupFirst + i, snap, { 1: `(${i + 1})${name}` });
+      const overrides = { 1: `(${i + 1})${name}` };
+      for (let c = 2; c <= 8; c++) overrides[c] = null;
+      stampRow(ws, topGroupFirst + i, snap, overrides);
     });
   }
 
@@ -668,4 +670,166 @@ async function copyDrawings(templateBuf, generatedBuf) {
   return outZip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' });
 }
 
-module.exports = { generateQuote };
+/* ═══════════════════════════════════════════════════════════════════════
+   § 7. 스마트시스템 내역서 전용 생성기
+   ─ 스마트 견적서 템플릿 (2)상세내역서 시트) 전용
+   ─ 마커: {{ITEM_START}} {{ITEM_END}} {{MAIN_GROUP_ROW}} {{SUB_GROUP_ROW}}
+           {{ITEM_ROW}} {{GRAND_TOTAL}}
+   ─ 컬럼: A=코드 B=공종 C=규격 D=단위 E=수량 F=공급단가 G=공급가액 H=비고 I=마커
+═══════════════════════════════════════════════════════════════════════ */
+async function generateSmartQuote(data) {
+  const tplFile = path.join(__dirname, 'template', path.basename(data.template));
+  const templateBuf = fs.readFileSync(tplFile);
+  const wb = new ExcelJS.Workbook();
+  await wb.xlsx.load(templateBuf);
+
+  const ws = wb.getWorksheet('2)상세내역서');
+  if (!ws) throw new Error('2)상세내역서 시트를 찾을 수 없습니다.');
+
+  /* ── 마커 탐색 */
+  const m = { start: -1, end: -1, mainGroup: -1, subGroup: -1, itemRow: -1, grandTotal: -1 };
+  ws.eachRow((row, rn) => {
+    row.eachCell({ includeEmpty: false }, cell => {
+      const v = String(cell.value ?? '');
+      if (v.includes('{{ITEM_START}}'))     m.start      = rn;
+      if (v.includes('{{ITEM_END}}'))       m.end        = rn;
+      if (v.includes('{{MAIN_GROUP_ROW}}')) m.mainGroup  = rn;
+      if (v.includes('{{SUB_GROUP_ROW}}'))  m.subGroup   = rn;
+      if (v.includes('{{ITEM_ROW}}'))       m.itemRow    = rn;
+      if (v.includes('{{GRAND_TOTAL}}'))    m.grandTotal = rn;
+    });
+  });
+  if (m.start < 0 || m.end < 0 || m.mainGroup < 0 || m.itemRow < 0)
+    throw new Error(`스마트 마커를 찾지 못했습니다: ${JSON.stringify(m)}`);
+
+  /* ── 템플릿 행 스냅샷 (삭제 전) */
+  const mainGroupSnap = snapshotRow(ws, m.mainGroup, 9);
+  const subGroupSnap  = m.subGroup > 0 ? snapshotRow(ws, m.subGroup, 9) : null;
+  const itemRowSnap   = snapshotRow(ws, m.itemRow, 9);
+
+  /* ── 헤더 플레이스홀더 치환 (전 시트, ITEM_START 이전 행만) */
+  const phMap = {
+    '{{현장명}}':          data.client  || '',
+    '{{거래처명 현장명}}': data.client  || '',
+    '{{담당자}}':          data.manager || '',
+    '{{연락처}}':          data.contact || '',
+    '{{견적일자}}':         data.date    || '',
+    '{{견적명}}':           data.site    || '',
+  };
+  for (const sheet of wb.worksheets) {
+    const stop = sheet === ws ? m.start - 1 : 9999;
+    sheet.eachRow((row, rn) => {
+      if (rn > stop) return;
+      row.eachCell({ includeEmpty: false }, cell => {
+        if (typeof cell.value !== 'string') return;
+        let v = cell.value;
+        for (const [ph, val] of Object.entries(phMap)) v = v.replace(ph, val);
+        cell.value = v;
+      });
+    });
+  }
+
+  /* ── footer 병합 사전 캡처 */
+  const footerMergesOrig = [];
+  if (ws._merges) {
+    Object.values(ws._merges).forEach(mg => {
+      const { top, left, bottom, right } = mg.model;
+      if (top > m.end) footerMergesOrig.push({ top, left, bottom, right });
+    });
+  }
+
+  /* ── 행 계획 빌드 */
+  const smartGroups = (data.items || []).filter(it => it.type === 'smart_group');
+  const plan = [];
+  for (const group of smartGroups) {
+    plan.push({ type: 'main_group', name: group.name });
+    const items = group.items || [];
+    const hasCats = subGroupSnap && items.some(it => it.cat && String(it.cat).trim());
+    if (hasCats) {
+      const catOrder = [], byCat = {};
+      for (const it of items) {
+        const c = String(it.cat || '').trim() || '기타';
+        if (!byCat[c]) { byCat[c] = []; catOrder.push(c); }
+        byCat[c].push(it);
+      }
+      for (const cat of catOrder) {
+        plan.push({ type: 'sub_group', name: cat });
+        for (const it of byCat[cat]) plan.push({ type: 'item', item: it });
+      }
+    } else {
+      for (const it of items) plan.push({ type: 'item', item: it });
+    }
+  }
+
+  /* ── 마커 구역 삭제 (ITEM_START ~ ITEM_END) */
+  const deleteCount = m.end - m.start + 1;
+  const insertAt    = m.start;
+  if (ws._merges) {
+    Object.keys(ws._merges)
+      .filter(k => { const { top, bottom } = ws._merges[k].model; return top >= insertAt && bottom <= insertAt + deleteCount - 1; })
+      .forEach(k => delete ws._merges[k]);
+  }
+  ws.spliceRows(insertAt, deleteCount);
+
+  /* ── 새 행 삽입 */
+  if (plan.length > 0) ws.spliceRows(insertAt, 0, ...plan.map(() => []));
+
+  /* ── 행 스탬프 */
+  const itemGRows = [];
+  plan.forEach((p, i) => {
+    const rn = insertAt + i;
+    if (p.type === 'main_group') {
+      stampRow(ws, rn, mainGroupSnap, { 2: p.name }, 9);
+    } else if (p.type === 'sub_group' && subGroupSnap) {
+      stampRow(ws, rn, subGroupSnap, { 2: p.name }, 9);
+    } else if (p.type === 'item') {
+      const it    = p.item;
+      const qty   = typeof it.qty === 'number' ? it.qty : (typeof it.quantity === 'number' ? it.quantity : 1);
+      const price = typeof it.price === 'number' ? it.price : 0;
+      stampRow(ws, rn, itemRowSnap, {
+        1: it.item_id || null,
+        2: it.name    || '',
+        3: it.spec    || '',
+        4: it.unit    || '식',
+        5: qty,
+        6: price > 0 ? price : null,
+        7: price > 0 ? { formula: `E${rn}*F${rn}` } : null,
+        8: it.note    || null,
+      }, 9);
+      ws.getRow(rn).getCell(5).numFmt = '#,##0';
+      if (price > 0) {
+        ws.getRow(rn).getCell(6).numFmt = NUM_FMT;
+        ws.getRow(rn).getCell(7).numFmt = NUM_FMT;
+        itemGRows.push(rn);
+      }
+    }
+  });
+
+  /* ── footer 병합 복원 + 합계 행 수식 */
+  const netShift = plan.length - deleteCount;
+  if (ws._merges) {
+    Object.keys(ws._merges)
+      .filter(k => ws._merges[k].model.top >= insertAt + plan.length)
+      .forEach(k => delete ws._merges[k]);
+  }
+  footerMergesOrig.forEach(({ top, left, bottom, right }) => {
+    ws.mergeCells(top + netShift, left, bottom + netShift, right);
+  });
+
+  if (m.grandTotal > 0) {
+    const gtRn    = m.grandTotal + netShift;
+    const gtCell  = ws.getRow(gtRn).getCell(7);
+    gtCell.value  = itemGRows.length > 0
+      ? { formula: `SUM(${itemGRows.map(r => `G${r}`).join(',')})` }
+      : 0;
+    gtCell.numFmt = NUM_FMT;
+    ws.getRow(gtRn).getCell(9).value = null; // 마커 제거
+  }
+
+  if (ws.pageSetup) delete ws.pageSetup.printArea;
+
+  const generated = await wb.xlsx.writeBuffer();
+  return copyDrawings(templateBuf, generated);
+}
+
+module.exports = { generateQuote, generateSmartQuote };

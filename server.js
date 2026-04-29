@@ -3,7 +3,7 @@
 const http = require('http');
 const fs   = require('fs');
 const path = require('path');
-const { generateQuote } = require('./generate_quote');
+const { generateQuote, generateSmartQuote } = require('./generate_quote');
 
 const ROOT = __dirname;
 const PORT = process.env.PORT ? Number(process.env.PORT) : 5173;
@@ -55,7 +55,8 @@ const server = http.createServer((req, res) => {
       req.on('end', async () => {
         try {
           const data   = JSON.parse(body);
-          const buffer = await generateQuote(data);
+          const isSmartTpl = data.template && data.template.includes('스마트');
+          const buffer = await (isSmartTpl ? generateSmartQuote(data) : generateQuote(data));
           const fname  = encodeURIComponent(
             `${data.client || 'OPENWORKS'}_${data.date || ''}.xlsx`
           );

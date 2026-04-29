@@ -14,6 +14,8 @@ function formatPhone(el){
   el.value = formatted;
 }
 let NOTES_DEFAULT = [];
+let SMART_GROUPS = [];
+let catalogMode = 'normal';
 
 function normRowKeys(row) {
   const o = {};
@@ -65,7 +67,7 @@ function normRowKeys(row) {
       o.u = v;
       continue;
     }
-    if (key === "수량" || key === "qty" || key === "q") {
+    if (key === "수량" || key === "qty" || key === "quantity" || key === "q") {
       o.q = v;
       continue;
     }
@@ -184,7 +186,60 @@ function catalogFromWorkbook(wb) {
     notesDefault = notesDefault.filter(Boolean);
   }
 
-  return { SETS: sets, ITEMS: items, NOTES_DEFAULT: notesDefault };
+  // SmartGroups / SmartItems 파싱
+  const sgSh = wb.Sheets.SmartGroups;
+  const siSh = wb.Sheets.SmartItems;
+  let smartGroups = [];
+  if (sgSh && siSh) {
+    const sgRows = X.utils.sheet_to_json(sgSh, {defval:''}).map(r => {
+      const o = {};
+      for (const k of Object.keys(r)) {
+        const key = String(k).trim().toLowerCase();
+        const v = r[k];
+        if (key === 'group_id')   { o.id  = v; continue; }
+        if (key === 'group_name') { o.name = v; continue; }
+        if (key === 'cat' || key === '카테고리') { o.cat = v; continue; }
+        if (key === 'sort' || key === '순서')    { o.sort = cellNum(v); continue; }
+        o[key] = v;
+      }
+      return o;
+    });
+    const siRows = X.utils.sheet_to_json(siSh, {defval:''}).map(r => {
+      const o = {};
+      for (const k of Object.keys(r)) {
+        const key = String(k).trim().toLowerCase();
+        const v = r[k];
+        if (key === 'group_id')   { o.group_id = v; continue; }
+        if (key === '설명' || key === 'description') { o.desc = v; continue; }
+        if (key === 'items_id' || key === 'item_id') { o.item_id = v; continue; }
+        if (key === 'name')       { o.name = v; continue; }
+        if (key === '규격' || key === 'spec')    { o.spec = v; continue; }
+        if (key === '단위' || key === 'unit')    { o.unit = cellStr(v).trim(); continue; }
+        if (key === '수량' || key === 'quantity' || key === 'qty') { o.qty = cellNum(v); continue; }
+        if (key === '가격' || key === 'price' || key === '단가')   { o.price = cellNum(v); continue; }
+        if (key === '비고' || key === 'note')    { o.note = v; continue; }
+        o[key] = v;
+      }
+      return o;
+    });
+    const byGroup = {};
+    for (const it of siRows) {
+      const gid = cellStr(it.group_id).trim();
+      if (!gid) continue;
+      (byGroup[gid] = byGroup[gid] || []).push(it);
+    }
+    smartGroups = sgRows
+      .filter(r => cellStr(r.id).trim())
+      .sort((a, b) => (a.sort||0) - (b.sort||0))
+      .map(r => {
+        const gid = cellStr(r.id).trim();
+        const items = byGroup[gid] || [];
+        const totalPrice = items.reduce((s, it) => s + (it.price||0) * Math.max(it.qty||1, 1), 0);
+        return { id: gid, name: cellStr(r.name), cat: cellStr(r.cat), sort: r.sort||0, items, totalPrice };
+      });
+  }
+
+  return { SETS: sets, ITEMS: items, NOTES_DEFAULT: notesDefault, SMART_GROUPS: smartGroups };
 }
 
 function showCatalogErr(msg) {
@@ -205,6 +260,7 @@ function initAfterCatalog() {
   renderItems();
   renderCart();
   updateHistCount();
+  if (catalogMode === 'smart') renderSmartGroups();
 }
 
 async function loadCatalog() {
@@ -235,6 +291,7 @@ async function loadCatalog() {
   SETS = data.SETS || [];
   ITEMS = data.ITEMS || [];
   NOTES_DEFAULT = data.NOTES_DEFAULT || [];
+  SMART_GROUPS = data.SMART_GROUPS || [];
   if (!SETS.length && !ITEMS.length) {
     showCatalogErr("세트/단품 데이터가 비어 있습니다.");
     SETS = [];
@@ -340,6 +397,45 @@ function onMemberPriceChange(id,idx,val){
   cart[id].customPrices[idx]=num;
   recalcTotals();
 }
+function adjMember(setId,idx,d,e){
+  stop(e);
+  const c=cart[setId];
+  if(!c)return;
+  c.members[idx].q=Math.max(1,(c.members[idx].q||1)+d);
+  renderCart();
+}
+function moveMember(setId,idx,dir,e){
+  stop(e);
+  const c=cart[setId];
+  if(!c)return;
+  const to=idx+dir;
+  if(to<0||to>=c.members.length)return;
+  [c.members[idx],c.members[to]]=[c.members[to],c.members[idx]];
+  if(c.customPrices){
+    const a=c.customPrices[idx],b=c.customPrices[to];
+    if(a!=null)c.customPrices[to]=a; else delete c.customPrices[to];
+    if(b!=null)c.customPrices[idx]=b; else delete c.customPrices[idx];
+  }
+  renderCart();
+}
+function rmMember(setId,idx,e){
+  stop(e);
+  const c=cart[setId];
+  if(!c)return;
+  c.members.splice(idx,1);
+  // customPrices 인덱스 재정렬
+  if(c.customPrices){
+    const np={};
+    Object.entries(c.customPrices).forEach(([k,v])=>{
+      const ki=parseInt(k);
+      if(ki<idx)np[ki]=v;
+      else if(ki>idx)np[ki-1]=v;
+    });
+    c.customPrices=np;
+  }
+  if(c.members.length===0){delete cart[setId];document.querySelectorAll('[id="pc-'+setId+'"]').forEach(el=>el.classList.remove('sel'));}
+  renderCart();syncSteps();
+}
 function formatPriceInput(el){
   const raw=el.value.replace(/,/g,'');
   if(raw&&!isNaN(raw))el.value=parseInt(raw).toLocaleString('ko-KR');
@@ -355,6 +451,8 @@ function cartSupply(){
     const mult=c.type==='set'?(c.mult||1):(c.qty||1);
     if(c.type==='set'){
       c.members.forEach((m,i)=>{s+=effectiveMemberPrice(c,i)*m.q*mult;});
+    }else if(c.type==='smart_group'){
+      s+=c.totalPrice||0;
     }else{
       s+=effectiveItemPrice(c)*mult;
     }
@@ -383,8 +481,20 @@ function renderCart(){
       const memRows=c.members.map((m,i)=>{
         const ep=effectiveMemberPrice(c,i);
         const la=ep*m.q*mult;
-        return`<div class="cim-row" style="flex-direction:column;align-items:stretch;gap:3px">
-          <div style="display:flex;justify-content:space-between"><span class="cim-n">${m.n}${m.note?` (${m.note})`:''} ×${m.q*mult}</span><span class="cim-q">${N(la)} 원</span></div>
+        return`<div class="cim-row" data-setid="${id}" data-idx="${i}" ondragover="onMemberRowDragOver(event)" ondragleave="onMemberRowDragLeave(event)" style="flex-direction:column;align-items:stretch;gap:3px">
+          <div style="display:flex;justify-content:space-between;align-items:center">
+            <span class="cim-n">${m.n}${m.note?` (${m.note})`:''}</span>
+            <button class="ci-rm" style="font-size:11px;padding:0 5px;line-height:18px" onclick="rmMember('${id}',${i},event)" title="항목 삭제">×</button>
+          </div>
+          <div style="display:flex;align-items:center;gap:6px;justify-content:space-between">
+            <div class="ci-stepper" style="margin:0;gap:4px">
+              <span class="ci-slbl">수량</span>
+              <button class="sbtn" onclick="adjMember('${id}',${i},-1,event)">−</button>
+              <span class="sval">×${m.q}</span>
+              <button class="sbtn" onclick="adjMember('${id}',${i},1,event)">+</button>
+            </div>
+            <span class="cim-q">${N(la)} 원</span>
+          </div>
           <div class="mem-price-row">
             <span class="mem-price-lbl">단가 수정</span>
             <input class="mem-price-in" value="${N(ep)}" onchange="onMemberPriceChange('${id}',${i},this.value);formatPriceInput(this)" oninput="onMemberPriceChange('${id}',${i},this.value)" onfocus="this.select()" onclick="event.stopPropagation()">
@@ -398,6 +508,12 @@ function renderCart(){
         <div class="ci-stepper"><span class="ci-slbl">배수</span><button class="sbtn" onclick="adj('${id}',-1,event)">−</button><span class="sval">×${mult}</span><button class="sbtn" onclick="adj('${id}',1,event)">+</button></div>
         <div class="ci-drop-hint">단품을 여기에 드롭</div>
         <div class="ci-members" style="margin-top:8px;padding-top:8px;border-top:1px solid var(--wire)">${memRows}</div>
+      </div>`;
+    }else if(c.type==='smart_group'){
+      html+=`<div class="ci">
+        <div class="ci-top"><div class="ci-name">${c.name}</div><button class="ci-rm" onclick="rmCart('${id}')">×</button></div>
+        <div class="ci-row"><span class="ci-tag" style="background:var(--sig);color:#000">스마트</span><span style="font-family:var(--mono);font-size:12px;color:var(--ice)">${c.totalPrice>0?N(c.totalPrice)+' 원':'별도협의'}</span></div>
+        <div style="font-size:10px;color:var(--mist);margin-top:4px">${c.items.length}개 품목 포함</div>
       </div>`;
     }else{
       const ep=effectiveItemPrice(c);
@@ -446,6 +562,7 @@ function onCatalogDragEnd(e){
   e.currentTarget.classList.remove('dragging');
   document.getElementById('cart-scroll').classList.remove('drop-zone','drop-active');
   document.querySelectorAll('.ci-set').forEach(el=>el.classList.remove('drop-target'));
+  document.querySelectorAll('.cim-row').forEach(el=>el.classList.remove('drop-before','drop-after'));
 }
 function onCartDragOver(e){
   e.preventDefault();
@@ -476,9 +593,18 @@ function onCartDrop(e){
     const src=ITEMS.find(i=>i.id===id);
     if(!src) return;
     const set=cart[setId];
-    const existing=set.members.findIndex(m=>m.n===src.name);
+    const existing=set.members.findIndex(m=>m.itemId===src.id||m.n===src.name);
     if(existing>=0){ set.members[existing].q+=1; }
-    else { set.members.push({n:src.name,q:1,p:src.p,spec:src.spec||''}); }
+    else {
+      const memberRow=e.target.closest('.cim-row');
+      let insertIdx=set.members.length;
+      if(memberRow&&memberRow.dataset.setid===setId){
+        const rowIdx=parseInt(memberRow.dataset.idx);
+        const rect=memberRow.getBoundingClientRect();
+        insertIdx=e.clientY<rect.top+rect.height/2?rowIdx:rowIdx+1;
+      }
+      set.members.splice(insertIdx,0,{itemId:src.id,n:src.name,q:1,p:src.p,spec:src.spec||'',u:src.u||'EA'});
+    }
     renderCart();syncSteps();
     return;
   }
@@ -495,11 +621,23 @@ function onCartSetDragLeave(e){
   if(e.currentTarget.contains(e.relatedTarget)) return;
   e.currentTarget.classList.remove('drop-target');
 }
+function onMemberRowDragOver(e){
+  e.preventDefault();
+  e.stopPropagation();
+  const row=e.currentTarget;
+  const rect=row.getBoundingClientRect();
+  row.classList.remove('drop-before','drop-after');
+  row.classList.add(e.clientY<rect.top+rect.height/2?'drop-before':'drop-after');
+}
+function onMemberRowDragLeave(e){
+  if(e.currentTarget.contains(e.relatedTarget)) return;
+  e.currentTarget.classList.remove('drop-before','drop-after');
+}
 
 
 function saveQuote(){
   const client=document.getElementById('f-client').value||'(미입력)';
-  const site=document.getElementById('f-site').value||'(미입력)';
+  const site=document.getElementById('f-site').value||'스마트 안전관리 솔루션';
   const manager=document.getElementById('f-manager').value||'';
   const contact=document.getElementById('f-contact').value||'';
   const date=document.getElementById('f-date').value||new Date().toISOString().slice(0,10);
@@ -518,6 +656,7 @@ function saveQuote(){
   const h=loadHistory();
   h.unshift({id:'q'+Date.now(),client,site,manager,contact,date,valid,notes,
     supply,vat:supply*.1,total:supply*1.1,status:'review',items:snapshot,
+    template:selectedTemplate,
     createdAt:new Date().toISOString()});
   saveHistory(h);updateHistCount();
   const btn=document.getElementById('save-btn');
@@ -585,7 +724,7 @@ function deleteQuote(id){if(!confirm('이 견적 이력을 삭제할까요?'))re
 function addNote(value=''){
   const li=document.createElement('div');
   li.className='note-item';
-  li.innerHTML=`<input type="text" placeholder="납품기한, 특이사항 등 추가 입력" value="${value.replace(/"/g,'&quot;')}">
+  li.innerHTML=`<input type="text" placeholder="일반적이지 않은 해당 견적의 특수조건을 입력하세요" value="${value.replace(/"/g,'&quot;')}">
     <button class="note-del-btn" onclick="removeNote(this)" title="삭제">×</button>`;
   document.getElementById('note-list').appendChild(li);
 }
@@ -601,11 +740,12 @@ function _buildPayload(src){
     client:src.client||'',site:src.site||'',
     manager:src.manager||'',contact:src.contact||'',
     date:src.date||'',valid:src.valid||'30일',
+    template:src.template||'',
     notes:src.notes||(src.note?[src.note]:[]),items:src.items||[]
   };
   return {
     client:  document.getElementById('f-client').value||'(미입력)',
-    site:    document.getElementById('f-site').value||'(미입력)',
+    site:    document.getElementById('f-site').value||'스마트 안전관리 솔루션',
     manager: document.getElementById('f-manager').value||'',
     contact: document.getElementById('f-contact').value||'',
     date:    document.getElementById('f-date').value||new Date().toISOString().slice(0,10),
@@ -615,6 +755,8 @@ function _buildPayload(src){
     items:   Object.entries(cart).map(([,c])=>{
       if(c.type==='set') return{type:'set',name:c.name,cat:c.cat,mult:c.mult||1,
         members:c.members.map((m,i)=>({...m,effectiveP:effectiveMemberPrice(c,i)}))};
+      if(c.type==='smart_group') return{type:'smart_group',name:c.name,cat:c.cat,
+        items:c.items.map(it=>({...it})),totalPrice:c.totalPrice||0};
       return{type:'item',name:c.name,cat:c.cat,qty:c.qty||1,
         effectiveP:effectiveItemPrice(c),unit:c.unit||'식',spec:c.spec||'',note:c.note||''};
     })
@@ -631,7 +773,8 @@ async function downloadFromHist(id){
     const blob=await resp.blob();
     const url=URL.createObjectURL(blob);
     const a=document.createElement('a');
-    a.href=url;a.download=`${p.client}_${p.date}.xlsx`;
+    const ds=p.date.replace(/-/g,'').slice(2);
+    a.href=url;a.download=`${p.client}_${p.site}_${ds}.xlsx`;
     document.body.appendChild(a);a.click();document.body.removeChild(a);URL.revokeObjectURL(url);
   }catch(e){alert('오류: '+e.message);}
 }
@@ -654,7 +797,7 @@ function renderSets(){
       <div class="pc-cat">${s.cat}</div>
       <div class="pc-name">${s.name}</div>
       <div class="pc-spec">${s.desc}</div>
-      <div class="pc-foot"><span class="pc-price">${tot>0?N(tot)+' 원~':'별도협의'}</span><span class="pc-badge">${s.members.length}개 품목</span></div>
+      <div class="pc-foot"><span class="pc-badge">${s.members.length}개 품목</span><span class="pc-price">${tot>0?N(tot)+' 원':'별도협의'}</span></div>
       <div class="pc-stepper" onclick="event.stopPropagation()">
         <span class="stlbl">배수</span>
         <button class="sbtn" onclick="adj('${s.id}',-1,event)">−</button>
@@ -671,6 +814,52 @@ function renderItems(){
   const sel=document.getElementById('item-cat');
   sel.innerHTML='<option value="">전체</option>'+cats.map(c=>`<option>${c}</option>`).join('');
   filterItems();
+}
+
+/* ── 스마트 견적 모드 ─────────────────────────────────────────────── */
+function switchCatalogMode(mode) {
+  catalogMode = mode;
+  const isSmartMode = mode === 'smart';
+  document.getElementById('cat-tabs').style.display   = isSmartMode ? 'none' : '';
+  document.getElementById('tab-sets').style.display   = isSmartMode ? 'none' : '';
+  document.getElementById('tab-items').style.display  = 'none';
+  document.getElementById('tab-smart').style.display  = isSmartMode ? '' : 'none';
+  if (isSmartMode && SMART_GROUPS.length) renderSmartGroups();
+}
+
+function renderSmartGroups() {
+  const grid = document.getElementById('smart-grid');
+  if (!grid) return;
+  if (!SMART_GROUPS.length) {
+    grid.innerHTML = '<div class="catalog-err">스마트 시스템 데이터가 없습니다.</div>';
+    return;
+  }
+  grid.innerHTML = SMART_GROUPS.map(g => {
+    const sel = cart[g.id] ? 'sel' : '';
+    return `<div class="pc ${sel}" id="pc-${g.id}" onclick="toggleSmartGroup('${g.id}',event)">
+      <div class="pc-chk"><svg viewBox="0 0 12 12"><polyline points="2,6 5,9 10,3"/></svg></div>
+      <div class="pc-cat">${g.cat||'스마트 안전관리'}</div>
+      <div class="pc-name">${g.name}</div>
+      <div class="pc-foot">
+        <span class="pc-badge">${g.items.length}개 품목</span>
+        <span class="pc-price">${g.totalPrice>0?N(g.totalPrice)+' 원':'별도협의'}</span>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function toggleSmartGroup(id, e) {
+  stop(e);
+  const el = e?.currentTarget || document.getElementById('pc-'+id);
+  if (cart[id]) {
+    delete cart[id];
+    el.classList.remove('sel');
+  } else {
+    const g = SMART_GROUPS.find(x => x.id === id);
+    cart[id] = { type:'smart_group', name:g.name, cat:g.cat, items:g.items.map(it=>({...it})), totalPrice:g.totalPrice };
+    el.classList.add('sel');
+  }
+  renderCart(); syncSteps();
 }
 
 function filterItems(){
@@ -707,6 +896,7 @@ async function loadTemplates() {
     const container = document.getElementById('tpl-list');
     if (!list.length) return;
     selectedTemplate = list[0].filename;
+    switchCatalogMode(list[0].filename.includes('스마트') ? 'smart' : 'normal');
     container.innerHTML = list.map((t, i) =>
       `<button class="tpl-btn${i===0?' on':''}" onclick="selectTemplate(this,'${t.filename}')">${t.label}</button>`
     ).join('');
@@ -717,6 +907,7 @@ function selectTemplate(btn, filename) {
   document.querySelectorAll('.tpl-btn').forEach(b => b.classList.remove('on'));
   btn.classList.add('on');
   selectedTemplate = filename;
+  switchCatalogMode(filename.includes('스마트') ? 'smart' : 'normal');
 }
 
 /* ────────────────────────────────────────────────
@@ -735,7 +926,8 @@ async function generateExcel(){
     const blob=await resp.blob();
     const url=URL.createObjectURL(blob);
     const a=document.createElement('a');
-    a.href=url;a.download=`${p.client}_${p.date}.xlsx`;
+    const ds=p.date.replace(/-/g,'').slice(2);
+    a.href=url;a.download=`${p.client}_${p.site}_${ds}.xlsx`;
     document.body.appendChild(a);a.click();document.body.removeChild(a);URL.revokeObjectURL(url);
     btn.textContent='✓ 완료';btn.style.borderColor='var(--sigbdr)';btn.style.color='var(--sig)';
     setTimeout(()=>{btn.textContent=orig;btn.style.borderColor='';btn.style.color='';btn.disabled=false;},2000);
