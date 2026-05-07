@@ -6,7 +6,7 @@ const path = require('path');
 const { generateQuote, generateSmartQuote } = require('./generate_quote');
 
 const ROOT = __dirname;
-const PORT = process.env.PORT ? Number(process.env.PORT) : 5174;
+const PORT = process.env.PORT ? Number(process.env.PORT) : 5173;
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
