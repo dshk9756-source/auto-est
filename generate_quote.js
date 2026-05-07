@@ -41,15 +41,30 @@ const NUM_FMT       = '#,##0';
  * 지정 행의 모든 셀 스타일(font·fill·border·alignment·numFmt)과
  * 행 높이, 그리고 해당 행에 걸린 병합 범위를 캡처한다.
  */
-function snapshotRow(ws, rowNum, maxCol = 8) {
+function resolveThemeFill(fill, themeColors) {
+  if (!fill || !themeColors) return fill;
+  const f = JSON.parse(JSON.stringify(fill));
+  const resolve = col => {
+    if (!col || col.theme == null) return col;
+    const base = themeColors[col.theme];
+    if (!base) return col;
+    return { argb: applyExcelTint(base, col.tint || 0) };
+  };
+  if (f.fgColor) f.fgColor = resolve(f.fgColor);
+  if (f.bgColor && f.bgColor.theme != null) f.bgColor = resolve(f.bgColor);
+  return f;
+}
+
+function snapshotRow(ws, rowNum, maxCol = 8, themeColors = null) {
   const row   = ws.getRow(rowNum);
   const cells = {};
 
   for (let c = 1; c <= maxCol; c++) {
     const cell = row.getCell(c);
+    const rawFill = cell.fill ? JSON.parse(JSON.stringify(cell.fill)) : undefined;
     cells[c] = {
       font:      cell.font      ? JSON.parse(JSON.stringify(cell.font))      : undefined,
-      fill:      cell.fill      ? JSON.parse(JSON.stringify(cell.fill))      : undefined,
+      fill:      resolveThemeFill(rawFill, themeColors),
       border:    cell.border    ? JSON.parse(JSON.stringify(cell.border))    : undefined,
       alignment: cell.alignment ? JSON.parse(JSON.stringify(cell.alignment)) : undefined,
       numFmt:    cell.numFmt    || undefined,
@@ -191,6 +206,7 @@ function findMarkers(ws) {
     grandTotal:      -1,  // {{GRAND_TOTAL}} → 합계 행 (footer)
     topGroupFirst:   -1,  // 첫 {{TOP_GROUP_N}} 행
     topGroupLast:    -1,  // 마지막 {{TOP_GROUP_N}} 행 (반복 템플릿 기준)
+    safetyNoteRows:  [],  // {{SAFETY_NOTE_ROW}} 행 목록 (안전관리 그룹 전용)
   };
   ws.eachRow((row, rn) => {
     row.eachCell({ includeEmpty: false }, cell => {
@@ -210,6 +226,7 @@ function findMarkers(ws) {
         if (m.topGroupFirst < 0) m.topGroupFirst = rn;
         m.topGroupLast = rn;
       }
+      if (v.includes('{{SAFETY_NOTE_ROW}}')) m.safetyNoteRows.push(rn);
     });
   });
   return m;
@@ -297,55 +314,53 @@ function expandTopGroups(ws, markers, groupKeys) {
 /* ═══════════════════════════════════════════════════════════════════════
    § 4. 행 계획 빌드  ─  장바구니 순서 유지, 카테고리 변경 시만 GROUP_TITLE
 ═══════════════════════════════════════════════════════════════════════ */
-function buildPlan(items, hasEmptyRow) {
+function buildPlan(items, hasEmptyRow, hasSafetyNote) {
+  const safeGroups = new Set();
+  if (hasSafetyNote) {
+    for (const item of items) {
+      const cat = item.cat || '';
+      if (cat.includes('안전관리')) safeGroups.add(cat);
+    }
+  }
+
   const plan = [];
   let curGroup = null;
 
   for (const item of items) {
-    const group = item.type === 'set' ? item.name : item.cat;
+    const group = item.cat;
 
     if (group !== curGroup) {
-      // 이전 그룹 마감: 소계 + 빈 행
       if (curGroup !== null) {
         plan.push({ type: 'subtotal' });
         if (hasEmptyRow) plan.push({ type: 'empty' });
       }
       plan.push({ type: 'header' });
       plan.push({ type: 'group_title', name: group });
+      if (safeGroups.has(group)) {
+        plan.push({ type: 'safety_note', idx: 0 });
+        plan.push({ type: 'safety_note', idx: 1 });
+      }
       curGroup = group;
     }
 
-    if (item.type === 'set') {
-      const mult = item.mult || 1;
-      for (const m of item.members) {
-        plan.push({
-          type:  'item',
-          col_a: m.n    || '',
-          col_b: m.spec || '',
-          col_c: typeof m.effectiveP === 'number' ? m.effectiveP : 0,
-          col_d: (m.q || 1) * mult,
-          col_f: m.note || '',
-        });
-      }
-    } else {
-      plan.push({
-        type:  'item',
-        col_a: item.name || '',
-        col_b: item.spec || '',
-        col_c: typeof item.effectiveP === 'number' ? item.effectiveP : 0,
-        col_d: item.qty  || 1,
-        col_f: item.note || '',
-      });
-    }
+    plan.push({
+      type:  'item',
+      col_a: item.name || '',
+      col_b: item.spec || '',
+      col_c: typeof item.effectiveP === 'number' ? item.effectiveP : 0,
+      col_d: item.qty  || 1,
+      col_f: item.note || '',
+    });
   }
 
-  // 마지막 그룹 마감: 소계 추가
-  if (curGroup !== null) plan.push({ type: 'subtotal' });
+  if (curGroup !== null) {
+    plan.push({ type: 'subtotal' });
+    if (hasEmptyRow) plan.push({ type: 'empty' });
+  }
 
-  // 헤더용 groupKeys (첫 등장 순서)
   const seen = new Set(), groupKeys = [];
   for (const item of items) {
-    const k = item.type === 'set' ? item.name : item.cat;
+    const k = item.cat;
     if (!seen.has(k)) { seen.add(k); groupKeys.push(k); }
   }
 
@@ -372,7 +387,7 @@ async function generateQuote(data) {
 
   /* ── 2. 마커 탐색 */
   const markers = findMarkers(ws);
-  const { start, end, headerRow, groupTitleFirst, groupTitle, itemRow, subtotalRow, emptyRow, grandTotal } = markers;
+  const { start, end, headerRow, groupTitleFirst, groupTitle, itemRow, subtotalRow, emptyRow, grandTotal, safetyNoteRows } = markers;
   if (start < 0 || end < 0 || groupTitleFirst < 0 || itemRow < 0)
     throw new Error(`마커를 찾지 못했습니다: ${JSON.stringify(markers)}`);
 
@@ -397,9 +412,10 @@ async function generateQuote(data) {
   const itemRowSnap     = snapshotRow(ws, itemRow);
   const subtotalRowSnap = subtotalRow > 0 ? snapshotRow(ws, subtotalRow) : null;
   const emptyRowSnap    = emptyRow > 0    ? snapshotRow(ws, emptyRow)    : null;
+  const safetyNoteSnaps = safetyNoteRows.map(rn => snapshotRow(ws, rn));
 
   /* ── 5. 행 계획 빌드 */
-  const { plan, groupKeys } = buildPlan(data.items || [], emptyRow > 0);
+  const { plan, groupKeys } = buildPlan(data.items || [], emptyRow > 0, safetyNoteSnaps.length > 0);
 
   /* ── 6. 헤더 플레이스홀더 치환 ({{TOP_GROUP_N}} 제외) */
   fillHeader(ws, data, markers);
@@ -486,9 +502,16 @@ async function generateQuote(data) {
       subtotalRows.push(rn);
       groupItemStart = -1; // 리셋
 
+    } else if (p.type === 'safety_note' && safetyNoteSnaps.length > 0) {
+      const snap = safetyNoteSnaps[p.idx] || safetyNoteSnaps[0];
+      stampRow(ws, rn, snap);
+
     } else if (p.type === 'empty' && emptyRowSnap) {
       // 빈 구분 행 — 템플릿 스타일 그대로 사용
-      stampRow(ws, rn, emptyRowSnap);
+      // value=null 이면 ExcelJS가 스타일을 누락할 수 있으므로 공백(' ')을 채운다
+      const emptyVals = {};
+      for (let c = 1; c <= 6; c++) emptyVals[c] = ' ';
+      stampRow(ws, rn, emptyRowSnap, emptyVals);
 
     } else {
       // fallback 빈 행
@@ -628,6 +651,53 @@ async function generateQuote(data) {
    ─ xl/drawings/* · xl/media/* 전체를 동적으로 탐색하므로
      템플릿이 바뀌어도 코드 수정 불필요.
 ═══════════════════════════════════════════════════════════════════════ */
+/* ── 테마 색상 → ARGB 변환 헬퍼 ───────────────────────────────────── */
+function parseThemeColors(themeXml) {
+  const order = ['dk1','lt1','dk2','lt2','accent1','accent2','accent3','accent4','accent5','accent6'];
+  return order.map(name => {
+    const srgb = themeXml.match(new RegExp(`<a:${name}[^>]*>[^<]*<a:srgbClr val="([0-9A-Fa-f]{6})"`, 'i'));
+    if (srgb) return 'FF' + srgb[1].toUpperCase();
+    const sys = themeXml.match(new RegExp(`<a:${name}[^>]*>[^<]*<a:sysClr[^>]*lastClr="([0-9A-Fa-f]{6})"`, 'i'));
+    if (sys) return 'FF' + sys[1].toUpperCase();
+    return null;
+  });
+}
+
+function applyExcelTint(argbHex, tint) {
+  if (!tint) return argbHex;
+  const r = parseInt(argbHex.slice(2,4), 16) / 255;
+  const g = parseInt(argbHex.slice(4,6), 16) / 255;
+  const b = parseInt(argbHex.slice(6,8), 16) / 255;
+  const max = Math.max(r,g,b), min = Math.min(r,g,b);
+  let h = 0, l = (max+min)/2, s = 0;
+  if (max !== min) {
+    const d = max - min;
+    s = l > 0.5 ? d/(2-max-min) : d/(max+min);
+    if (max === r)      h = ((g-b)/d + (g<b?6:0)) / 6;
+    else if (max === g) h = ((b-r)/d + 2) / 6;
+    else                h = ((r-g)/d + 4) / 6;
+  }
+  l = tint < 0 ? l*(1+tint) : l*(1-tint)+tint;
+  l = Math.max(0, Math.min(1, l));
+  const hue2rgb = (p,q,t) => {
+    if (t<0) t+=1; if (t>1) t-=1;
+    if (t<1/6) return p+(q-p)*6*t;
+    if (t<1/2) return q;
+    if (t<2/3) return p+(q-p)*(2/3-t)*6;
+    return p;
+  };
+  let nr, ng, nb;
+  if (s === 0) { nr=ng=nb=l; }
+  else {
+    const q = l<0.5 ? l*(1+s) : l+s-l*s, p = 2*l-q;
+    nr = hue2rgb(p,q,h+1/3);
+    ng = hue2rgb(p,q,h);
+    nb = hue2rgb(p,q,h-1/3);
+  }
+  const hex = v => Math.round(Math.min(1,Math.max(0,v))*255).toString(16).padStart(2,'0').toUpperCase();
+  return 'FF' + hex(nr) + hex(ng) + hex(nb);
+}
+
 async function copyDrawings(templateBuf, generatedBuf) {
   const [tplZip, outZip] = await Promise.all([
     JSZip.loadAsync(templateBuf),
@@ -638,14 +708,26 @@ async function copyDrawings(templateBuf, generatedBuf) {
      ExcelJS 가 spliceRows 과정에서 앵커를 잘못 수정한 drawing XML 을
      템플릿 원본으로 복원한다. 파일명은 하드코딩하지 않고 동적 탐색.    */
   const toCopy = Object.keys(tplZip.files).filter(f =>
-    (f.startsWith('xl/drawings/') || f.startsWith('xl/media/')) &&
+    (f.startsWith('xl/drawings/') || f.startsWith('xl/media/') || f.startsWith('xl/theme/')) &&
     !tplZip.files[f].dir
   );
   for (const p of toCopy) {
     outZip.file(p, await tplZip.files[p].async('nodebuffer'));
   }
 
-  /* ── 2. [Content_Types].xml — drawing · 이미지 타입 누락 시 보완 ──
+  /* ── 2. xl/workbook.xml — definedNames 완전 제거 ──
+     ExcelJS 가 명명된 범위를 잘못 기록하거나, 행 삽입/삭제로 참조가 깨져
+     Excel 열 때 복구 경고가 뜨는 문제 수정.
+     행 번호가 바뀐 상태에서 원본을 그대로 이식하면 여전히 깨지므로
+     생성 파일의 definedNames 블록을 완전히 제거한다.                         */
+  const wbPath = 'xl/workbook.xml';
+  if (outZip.files[wbPath]) {
+    let outWb = await outZip.files[wbPath].async('string');
+    outWb = outWb.replace(/<definedNames[\s\S]*?<\/definedNames>\s*/g, '');
+    outZip.file(wbPath, outWb);
+  }
+
+  /* ── 3. [Content_Types].xml — drawing · 이미지 타입 누락 시 보완 ──
      ExcelJS 가 Content_Types 에서 drawing/이미지 항목을 누락시키는
      경우를 대비해 템플릿에 있는 항목을 추가한다.                        */
   const ctPath = '[Content_Types].xml';
@@ -680,6 +762,15 @@ async function copyDrawings(templateBuf, generatedBuf) {
 async function generateSmartQuote(data) {
   const tplFile = path.join(__dirname, 'template', path.basename(data.template));
   const templateBuf = fs.readFileSync(tplFile);
+
+  /* ── 테마 색상 사전 파싱 (스냅샷 시 theme 색상 → ARGB 변환용) */
+  let themeColors = null;
+  try {
+    const tplZipForTheme = await JSZip.loadAsync(templateBuf);
+    const themeFile = tplZipForTheme.files['xl/theme/theme1.xml'];
+    if (themeFile) themeColors = parseThemeColors(await themeFile.async('string'));
+  } catch(e) { /* 테마 파싱 실패 시 무시 */ }
+
   const wb = new ExcelJS.Workbook();
   await wb.xlsx.load(templateBuf);
 
@@ -702,10 +793,10 @@ async function generateSmartQuote(data) {
   if (m.start < 0 || m.end < 0 || m.mainGroup < 0 || m.itemRow < 0)
     throw new Error(`스마트 마커를 찾지 못했습니다: ${JSON.stringify(m)}`);
 
-  /* ── 템플릿 행 스냅샷 (삭제 전) */
-  const mainGroupSnap = snapshotRow(ws, m.mainGroup, 9);
-  const subGroupSnap  = m.subGroup > 0 ? snapshotRow(ws, m.subGroup, 9) : null;
-  const itemRowSnap   = snapshotRow(ws, m.itemRow, 9);
+  /* ── 템플릿 행 스냅샷 (삭제 전) — themeColors 전달로 theme 색상 즉시 ARGB 변환 */
+  const mainGroupSnap = snapshotRow(ws, m.mainGroup, 9, themeColors);
+  const subGroupSnap  = m.subGroup > 0 ? snapshotRow(ws, m.subGroup, 9, themeColors) : null;
+  const itemRowSnap   = snapshotRow(ws, m.itemRow, 9, themeColors);
 
   /* ── 헤더 플레이스홀더 치환 (전 시트, ITEM_START 이전 행만) */
   const phMap = {
@@ -727,6 +818,13 @@ async function generateSmartQuote(data) {
         cell.value = v;
       });
     });
+  }
+
+  /* ── 헤더 행 높이 사전 캡처 (spliceRows가 헤더 행 높이를 초기화하는 버그 방지) */
+  const headerHeights = {};
+  for (let rn = 1; rn < m.start; rn++) {
+    const row = ws.getRow(rn);
+    if (row.height != null && row.height > 0) headerHeights[rn] = row.height;
   }
 
   /* ── footer 병합 사전 캡처 */
@@ -761,9 +859,23 @@ async function generateSmartQuote(data) {
     }
   }
 
-  /* ── 마커 구역 삭제 (ITEM_START ~ ITEM_END) */
-  const deleteCount = m.end - m.start + 1;
-  const insertAt    = m.start;
+  /* ── 마커 구역 삭제 (ITEM_START ~ ITEM_END)
+       ITEM_START 행에 헤더 내용(수량·공급단가 등)이 함께 있는 경우,
+       그 행은 보존하고 마커 셀만 지운 뒤 다음 행부터 삭제한다. */
+  const itemStartRow = ws.getRow(m.start);
+  let itemStartHasContent = false;
+  itemStartRow.eachCell({ includeEmpty: false }, cell => {
+    const v = String(cell.value ?? '');
+    if (!v.includes('{{') && v.trim() !== '') itemStartHasContent = true;
+  });
+  if (itemStartHasContent) {
+    itemStartRow.eachCell({ includeEmpty: false }, cell => {
+      if (String(cell.value ?? '').includes('{{ITEM_START}}')) cell.value = null;
+    });
+  }
+
+  const insertAt    = itemStartHasContent ? m.start + 1 : m.start;
+  const deleteCount = m.end - insertAt + 1;
   if (ws._merges) {
     Object.keys(ws._merges)
       .filter(k => { const { top, bottom } = ws._merges[k].model; return top >= insertAt && bottom <= insertAt + deleteCount - 1; })
@@ -776,18 +888,20 @@ async function generateSmartQuote(data) {
 
   /* ── 행 스탬프 */
   const itemGRows = [];
+  let mainGroupCounter = 0;
   plan.forEach((p, i) => {
     const rn = insertAt + i;
     if (p.type === 'main_group') {
-      stampRow(ws, rn, mainGroupSnap, { 2: p.name }, 9);
+      mainGroupCounter++;
+      stampRow(ws, rn, mainGroupSnap, { 1: mainGroupCounter, 2: p.name }, 9);
     } else if (p.type === 'sub_group' && subGroupSnap) {
-      stampRow(ws, rn, subGroupSnap, { 2: p.name }, 9);
+      stampRow(ws, rn, subGroupSnap, { 1: null, 2: p.name }, 9);
     } else if (p.type === 'item') {
       const it    = p.item;
       const qty   = typeof it.qty === 'number' ? it.qty : (typeof it.quantity === 'number' ? it.quantity : 1);
       const price = typeof it.price === 'number' ? it.price : 0;
       stampRow(ws, rn, itemRowSnap, {
-        1: it.item_id || null,
+        1: null,
         2: it.name    || '',
         3: it.spec    || '',
         4: it.unit    || '식',
@@ -827,6 +941,242 @@ async function generateSmartQuote(data) {
   }
 
   if (ws.pageSetup) delete ws.pageSetup.printArea;
+
+  /* ── 헤더 행 높이 복원 (spliceRows로 변경된 헤더 높이를 템플릿 원본으로 되돌림) */
+  for (const [rn, h] of Object.entries(headerHeights)) {
+    ws.getRow(Number(rn)).height = h;
+  }
+
+  /* ── 잔여 마커 행 정리 ─────────────────────────────────────────────
+     spliceRows 이후에도 남아있을 수 있는 {{마커}} 텍스트를 가진 행을
+     역순으로 찾아 삭제한다.                                           */
+  const markerRows = [];
+  ws.eachRow((row, rn) => {
+    let hasMarker = false;
+    row.eachCell({ includeEmpty: false }, cell => {
+      const v = String(cell.value ?? '');
+      if (v.includes('{{') && v.includes('}}')) hasMarker = true;
+    });
+    if (hasMarker) markerRows.push(rn);
+  });
+  for (let i = markerRows.length - 1; i >= 0; i--) {
+    unmergeRow(ws, markerRows[i]);
+    ws.spliceRows(markerRows[i], 1);
+  }
+
+  /* ── 마커 열 숨김 (I열=col9: 프린트 범위에서 제외) */
+  ws.getColumn(9).hidden = true;
+
+  /* ═══════════════════════════════════════════════════════════════════
+     § 1)내역집계표 처리
+     ─ 대분류·소분류별 합계 금액을 집계해 내역집계표에 삽입한다.
+     ─ 컬럼: A=번호 B-D=공종(병합) E=규격 F=단위 G=수량 H=공급단가 I=공급가액 J=비고 K=마커
+  ═══════════════════════════════════════════════════════════════════ */
+  const ws1 = wb.getWorksheet('1)내역집계표');
+  if (ws1) {
+    /* ── 그룹/소분류별 합계 사전 계산 */
+    const groupTotals = {};
+    for (const group of smartGroups) {
+      let groupTotal = 0;
+      const subs = {};
+      for (const it of (group.items || [])) {
+        const qty   = typeof it.qty === 'number' ? it.qty : (typeof it.quantity === 'number' ? it.quantity : 1);
+        const price = typeof it.price === 'number' ? it.price : 0;
+        const amt   = qty * price;
+        groupTotal += amt;
+        const cat = String(it.cat || '').trim() || '기타';
+        subs[cat] = (subs[cat] || 0) + amt;
+      }
+      groupTotals[group.name] = { total: groupTotal, subs };
+    }
+
+    /* ── 마커 탐색 */
+    const m1 = { start: -1, end: -1, mainGroup: -1, subGroup: -1, grandTotal: -1 };
+    ws1.eachRow((row, rn) => {
+      row.eachCell({ includeEmpty: false }, cell => {
+        const v = String(cell.value ?? '');
+        if (v.includes('{{ITEM_START}}'))     m1.start     = rn;
+        if (v.includes('{{ITEM_END}}'))       m1.end       = rn;
+        if (v.includes('{{MAIN_GROUP_ROW}}')) m1.mainGroup = rn;
+        if (v.includes('{{SUB_GROUP_ROW}}'))  m1.subGroup  = rn;
+        if (v.includes('{{GRAND_TOTAL}}'))    m1.grandTotal = rn;
+      });
+    });
+
+    if (m1.start > 0 && m1.end > 0 && m1.mainGroup > 0) {
+      /* ── 열 너비 사전 캡처 (spliceRows 후 리셋 방지) */
+      const colWidths1 = {};
+      ws1.columns.forEach((col, idx) => { if (col.width) colWidths1[idx + 1] = col.width; });
+
+      /* ── 템플릿 스냅샷 */
+      const mainSnap1 = snapshotRow(ws1, m1.mainGroup, 11, themeColors);
+      const subSnap1  = m1.subGroup > 0 ? snapshotRow(ws1, m1.subGroup, 11, themeColors) : null;
+
+      /* ── 소분류 스냅샷 fill 보정: theme=0(dk1=검정)은 "배경 없음"으로 처리 */
+      if (subSnap1) {
+        for (let c = 1; c <= 11; c++) {
+          const cell = subSnap1.cells[c];
+          if (cell && cell.fill && cell.fill.fgColor && cell.fill.fgColor.argb === 'FF000000') {
+            cell.fill = undefined;
+          }
+        }
+      }
+
+      /* ── 헤더 행 높이 캡처 */
+      const headerHeights1 = {};
+      for (let rn = 1; rn <= m1.start; rn++) {
+        const r = ws1.getRow(rn);
+        if (r.height != null && r.height > 0) headerHeights1[rn] = r.height;
+      }
+
+      /* ── ITEM_START 행(m1.start) theme 색상 → 명시적 ARGB 변환
+           rows 1~(start-1)는 copyDrawings theme XML 복원으로 처리하지만,
+           ITEM_START 행은 theme 참조가 Excel에서 흰색으로 렌더링되는 문제가 있어
+           resolveThemeFill로 명시적 ARGB를 직접 지정한다. */
+      if (themeColors) {
+        const startR = ws1.getRow(m1.start);
+        for (let c = 1; c <= 11; c++) {
+          const cell = startR.getCell(c);
+          if (cell.fill && cell.fill.fgColor && cell.fill.fgColor.theme != null) {
+            cell.fill = resolveThemeFill(cell.fill, themeColors);
+          }
+        }
+      }
+
+      /* ── footer 병합 캡처 */
+      const footerMerges1 = [];
+      if (ws1._merges) {
+        Object.values(ws1._merges).forEach(mg => {
+          const { top, left, bottom, right } = mg.model;
+          if (top > m1.end) footerMerges1.push({ top, left, bottom, right });
+        });
+      }
+
+      /* ── 행 계획 빌드 (대분류·소분류만, 아이템 없음) */
+      const plan1 = [];
+      for (const group of smartGroups) {
+        plan1.push({ type: 'main_group', name: group.name });
+        const items = group.items || [];
+        const hasCats = subSnap1 && items.some(it => it.cat && String(it.cat).trim());
+        if (hasCats) {
+          const seen = [], catMap = {};
+          for (const it of items) {
+            const c = String(it.cat || '').trim() || '기타';
+            if (!catMap[c]) { catMap[c] = true; seen.push(c); }
+          }
+          for (const cat of seen) plan1.push({ type: 'sub_group', name: cat });
+        }
+      }
+
+      /* ── ITEM_START 행에 헤더 내용이 있으면 보존 */
+      const startRow1 = ws1.getRow(m1.start);
+      let startHasContent1 = false;
+      startRow1.eachCell({ includeEmpty: false }, cell => {
+        const v = String(cell.value ?? '');
+        if (!v.includes('{{') && v.trim() !== '') startHasContent1 = true;
+      });
+      if (startHasContent1) {
+        startRow1.eachCell({ includeEmpty: false }, cell => {
+          if (String(cell.value ?? '').includes('{{ITEM_START}}')) cell.value = null;
+        });
+      }
+
+      const insertAt1    = startHasContent1 ? m1.start + 1 : m1.start;
+      const deleteCount1 = m1.end - insertAt1 + 1;
+
+      if (ws1._merges) {
+        Object.keys(ws1._merges)
+          .filter(k => { const { top, bottom } = ws1._merges[k].model; return top >= insertAt1 && bottom <= insertAt1 + deleteCount1 - 1; })
+          .forEach(k => delete ws1._merges[k]);
+      }
+      ws1.spliceRows(insertAt1, deleteCount1);
+      if (plan1.length > 0) ws1.spliceRows(insertAt1, 0, ...plan1.map(() => []));
+
+      /* ── 행 스탬프 */
+      let mainCounter1 = 0;
+      const grandRefs1 = [];
+      plan1.forEach((p, i) => {
+        const rn = insertAt1 + i;
+        if (p.type === 'main_group') {
+          mainCounter1++;
+          const total = groupTotals[p.name]?.total || 0;
+          stampRow(ws1, rn, mainSnap1, {
+            1: mainCounter1,
+            2: p.name,
+            7: 1,
+            8: total > 0 ? total : null,
+            9: total > 0 ? { formula: `H${rn}*G${rn}` } : null,
+          }, 11);
+          if (total > 0) { ws1.getRow(rn).getCell(8).numFmt = NUM_FMT; ws1.getRow(rn).getCell(9).numFmt = NUM_FMT; }
+          grandRefs1.push(rn);
+        } else if (p.type === 'sub_group' && subSnap1) {
+          // 현재 소분류가 속한 대분류 이름 역추적
+          let parentName = null;
+          for (let j = i - 1; j >= 0; j--) {
+            if (plan1[j].type === 'main_group') { parentName = plan1[j].name; break; }
+          }
+          const subTotal = groupTotals[parentName]?.subs[p.name] || 0;
+          stampRow(ws1, rn, subSnap1, {
+            1: null,
+            2: p.name,
+            7: 1,
+            8: subTotal > 0 ? subTotal : null,
+            9: subTotal > 0 ? { formula: `H${rn}*G${rn}` } : null,
+          }, 11);
+          if (subTotal > 0) { ws1.getRow(rn).getCell(8).numFmt = NUM_FMT; ws1.getRow(rn).getCell(9).numFmt = NUM_FMT; }
+        }
+      });
+
+      /* ── footer 병합 복원 + 합계 수식 */
+      const netShift1 = plan1.length - deleteCount1;
+      if (ws1._merges) {
+        Object.keys(ws1._merges)
+          .filter(k => ws1._merges[k].model.top >= insertAt1 + plan1.length)
+          .forEach(k => delete ws1._merges[k]);
+      }
+      footerMerges1.forEach(({ top, left, bottom, right }) => {
+        ws1.mergeCells(top + netShift1, left, bottom + netShift1, right);
+      });
+
+      if (m1.grandTotal > 0) {
+        const gtRn1 = m1.grandTotal + netShift1;
+        const gtCell1 = ws1.getRow(gtRn1).getCell(9);
+        gtCell1.value  = grandRefs1.length > 0
+          ? { formula: `SUM(${grandRefs1.map(r => `I${r}`).join(',')})` }
+          : 0;
+        gtCell1.numFmt = NUM_FMT;
+        ws1.getRow(gtRn1).getCell(11).value = null;
+      }
+
+      /* ── 헤더 행 높이 복원 */
+      for (const [rn, h] of Object.entries(headerHeights1)) {
+        ws1.getRow(Number(rn)).height = h;
+      }
+
+      /* ── 열 너비 복원 (템플릿 원본 유지) */
+      for (const [c, w] of Object.entries(colWidths1)) {
+        ws1.getColumn(Number(c)).width = w;
+      }
+
+      /* ── 잔여 마커 정리 */
+      const markerRows1 = [];
+      ws1.eachRow((row, rn) => {
+        let has = false;
+        row.eachCell({ includeEmpty: false }, cell => {
+          if (String(cell.value ?? '').includes('{{')) has = true;
+        });
+        if (has) markerRows1.push(rn);
+      });
+      for (let i = markerRows1.length - 1; i >= 0; i--) {
+        unmergeRow(ws1, markerRows1[i]);
+        ws1.spliceRows(markerRows1[i], 1);
+      }
+
+      /* ── 인쇄 범위: J열까지만 (K열 이후 인쇄 제외) */
+      if (!ws1.pageSetup) ws1.pageSetup = {};
+      ws1.pageSetup.printArea = `A1:J${ws1.rowCount || 9999}`;
+    }
+  }
 
   const generated = await wb.xlsx.writeBuffer();
   return copyDrawings(templateBuf, generated);

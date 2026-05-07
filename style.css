@@ -215,12 +215,10 @@ header{
   border-color:var(--pri-bdr);background:var(--pri-bg);
   box-shadow:0 0 0 1px var(--pri-bdr);
 }
-.pc-cat{
-  font-size:10px;font-weight:600;color:var(--pri);
-  letter-spacing:.1em;text-transform:uppercase;margin-bottom:6px;opacity:.8;
-}
+.pc-cat{font-size:12px;font-weight:600;color:var(--pri);background:none;border:none;border-left:3px solid var(--pri);display:block;padding:1px 0 1px 6px;margin-bottom:8px;letter-spacing:.03em}
+.pc-tags{display:flex;flex-wrap:wrap;gap:4px;margin-bottom:8px}
+.pc-tag{font-size:10px;font-weight:500;color:var(--pri);background:var(--pri-bg);border:1px solid var(--pri-bdr);border-radius:10px;padding:1px 8px;letter-spacing:.02em}
 .pc-name{font-size:14px;font-weight:600;color:var(--text);line-height:1.4;margin-bottom:4px}
-.pc-spec{font-size:12px;color:var(--text2);line-height:1.55;margin-bottom:12px;max-height:60px;overflow:hidden}
 .pc-foot{display:flex;align-items:center;justify-content:space-between}
 .pc-price{
   font-family:var(--mono);font-size:14px;font-weight:500;color:var(--text);

@@ -1,15 +1,6 @@
 {
   "name": "estimate-project",
   "private": true,
-  "scripts": {
-    "build:catalog": "node scripts/build-catalog.mjs",
-    "serve": "node ./node_modules/serve/build/main.js . -p 5173",
-    "server": "node ./node_modules/serve/build/main.js . -p 5173"
-  },
-  "devDependencies": {
-    "serve": "^14.2.4",
-    "xlsx": "^0.18.5"
-  },
   "dependencies": {
     "exceljs": "^4.4.0"
   }

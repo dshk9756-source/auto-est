@@ -41,12 +41,8 @@ function normRowKeys(row) {
       o.id = v;
       continue;
     }
-    if (key === "세트명" || key === "setname") {
+    if (key === "세트명" || key === "setname" || key === "ui name" || key === "ui_name" || key === "uiname") {
       o.name = v;
-      continue;
-    }
-    if (key === "카테고리" || key === "category" || key === "cat") {
-      o.cat = v;
       continue;
     }
     if (key === "품목명" || key === "itemname" || key === "name") {
@@ -136,6 +132,7 @@ function catalogFromWorkbook(wb) {
       u:    cellStr(r.u) || (linked ? cellStr(linked.u) : "") || "EA",
       q:    cellNum(r.q) || 0,
       p:    linked ? cellNum(linked.p) : cellNum(r.p),
+      cat:  linked ? cellStr(linked.cat) : cellStr(r.cat),
     };
     const resolvedNote = note || linkedNote;
     if (resolvedNote) m.note = resolvedNote;
@@ -153,8 +150,6 @@ function catalogFromWorkbook(wb) {
       return {
         id,
         name: cellStr(r.name),
-        desc: cellStr(r.desc),
-        cat: cellStr(r.cat),
         members: bySet[id] || [],
       };
     });
@@ -212,6 +207,7 @@ function catalogFromWorkbook(wb) {
         if (key === 'group_id')   { o.group_id = v; continue; }
         if (key === '설명' || key === 'description') { o.desc = v; continue; }
         if (key === 'items_id' || key === 'item_id') { o.item_id = v; continue; }
+        if (key === '소분류' || key === 'sub_cat' || key === 'subcat' || key === 'sub_group') { o.cat = cellStr(v).trim(); continue; }
         if (key === 'name')       { o.name = v; continue; }
         if (key === '규격' || key === 'spec')    { o.spec = v; continue; }
         if (key === '단위' || key === 'unit')    { o.unit = cellStr(v).trim(); continue; }
@@ -346,7 +342,7 @@ function toggleSet(id,e){
   if(cart[id]){delete cart[id];el.classList.remove('sel');}
   else{
     const s=SETS.find(x=>x.id===id);
-    cart[id]={type:'set',name:s.name,cat:s.cat,mult:1,
+    cart[id]={type:'set',name:s.name,mult:1,
       members:s.members.map(m=>({...m})),customPrices:{}};
     el.classList.add('sel');
   }
@@ -402,20 +398,6 @@ function adjMember(setId,idx,d,e){
   const c=cart[setId];
   if(!c)return;
   c.members[idx].q=Math.max(1,(c.members[idx].q||1)+d);
-  renderCart();
-}
-function moveMember(setId,idx,dir,e){
-  stop(e);
-  const c=cart[setId];
-  if(!c)return;
-  const to=idx+dir;
-  if(to<0||to>=c.members.length)return;
-  [c.members[idx],c.members[to]]=[c.members[to],c.members[idx]];
-  if(c.customPrices){
-    const a=c.customPrices[idx],b=c.customPrices[to];
-    if(a!=null)c.customPrices[to]=a; else delete c.customPrices[to];
-    if(b!=null)c.customPrices[idx]=b; else delete c.customPrices[idx];
-  }
   renderCart();
 }
 function rmMember(setId,idx,e){
@@ -752,14 +734,34 @@ function _buildPayload(src){
     valid:   document.getElementById('f-valid').value||'30일',
     template: selectedTemplate,
     notes:   getNotes(),
-    items:   Object.entries(cart).map(([,c])=>{
-      if(c.type==='set') return{type:'set',name:c.name,cat:c.cat,mult:c.mult||1,
-        members:c.members.map((m,i)=>({...m,effectiveP:effectiveMemberPrice(c,i)}))};
-      if(c.type==='smart_group') return{type:'smart_group',name:c.name,cat:c.cat,
-        items:c.items.map(it=>({...it})),totalPrice:c.totalPrice||0};
-      return{type:'item',name:c.name,cat:c.cat,qty:c.qty||1,
-        effectiveP:effectiveItemPrice(c),unit:c.unit||'식',spec:c.spec||'',note:c.note||''};
-    })
+    items:   (()=>{
+      const raw=Object.entries(cart).map(([id,c])=>{
+        if(c.type==='set'){
+          const mult=c.mult||1;
+          return c.members.map((m,i)=>({type:'item',itemId:m.itemId||'',name:m.n||'',cat:m.cat||'',
+            qty:(m.q||1)*mult,effectiveP:effectiveMemberPrice(c,i),
+            unit:m.u||'EA',spec:m.spec||'',note:m.note||''}));
+        }
+        if(c.type==='smart_group') return{type:'smart_group',name:c.name,cat:c.cat,
+          items:c.items.map(it=>({...it})),totalPrice:c.totalPrice||0};
+        return{type:'item',itemId:id,name:c.name,cat:c.cat,qty:c.qty||1,
+          effectiveP:effectiveItemPrice(c),unit:c.unit||'식',spec:c.spec||'',note:c.note||''};
+      }).flat();
+      const merged=[];
+      for(const it of raw){
+        if(it.type!=='item'||!it.itemId){merged.push(it);continue;}
+        const dup=merged.find(x=>x.type==='item'&&x.itemId===it.itemId&&x.cat===it.cat);
+        if(dup){
+          dup.qty+=it.qty;
+          if(it.effectiveP>dup.effectiveP) dup.effectiveP=it.effectiveP;
+        }else merged.push(it);
+      }
+      merged.sort((a,b)=>{
+        const ca=a.cat||''; const cb=b.cat||'';
+        return ca<cb?-1:ca>cb?1:0;
+      });
+      return merged;
+    })()
   };
 }
 
@@ -780,9 +782,6 @@ async function downloadFromHist(id){
 }
 
 function renderCatTabs(){
-  const cats=['sets',...[...new Set(SETS.map(s=>s.cat))],'items'];
-  const catLabels={sets:'세트 패키지',items:'단품 선택'};
-  SETS.forEach(s=>catLabels[s.cat]=s.cat);
   const tabs=document.getElementById('cat-tabs');
   tabs.innerHTML=`<button class="ct on" onclick="switchTab('sets',this)">세트 패키지</button>
   <button class="ct" onclick="switchTab('items',this)">단품 선택</button>`;
@@ -792,11 +791,12 @@ function renderSets(){
   document.getElementById('set-grid').innerHTML=SETS.map(s=>{
     const tot=s.members.reduce((a,m)=>a+m.p*m.q,0);
     const mems=s.members.map(m=>`<div class="pm-row"><span class="pm-n">${m.n}</span><span class="pm-q">×${m.q}</span></div>`).join('');
+    const cats=[...new Set(s.members.map(m=>m.cat).filter(Boolean))];
+    const tags=cats.map(c=>`<span class="pc-tag">${c}</span>`).join('');
     return`<div class="pc" id="pc-${s.id}" onclick="toggleSet('${s.id}',event)" draggable="true" ondragstart="onCatalogDragStart(event,'set','${s.id}')" ondragend="onCatalogDragEnd(event)">
       <div class="pc-chk"><svg viewBox="0 0 12 12"><polyline points="2,6 5,9 10,3"/></svg></div>
-      <div class="pc-cat">${s.cat}</div>
       <div class="pc-name">${s.name}</div>
-      <div class="pc-spec">${s.desc}</div>
+      <div class="pc-tags">${tags}</div>
       <div class="pc-foot"><span class="pc-badge">${s.members.length}개 품목</span><span class="pc-price">${tot>0?N(tot)+' 원':'별도협의'}</span></div>
       <div class="pc-stepper" onclick="event.stopPropagation()">
         <span class="stlbl">배수</span>
