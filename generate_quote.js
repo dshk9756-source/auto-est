@@ -325,6 +325,7 @@ function buildPlan(items, hasEmptyRow, hasSafetyNote) {
 
   const plan = [];
   let curGroup = null;
+  let groupIdx = 0;
 
   for (const item of items) {
     const group = item.cat;
@@ -334,8 +335,9 @@ function buildPlan(items, hasEmptyRow, hasSafetyNote) {
         plan.push({ type: 'subtotal' });
         if (hasEmptyRow) plan.push({ type: 'empty' });
       }
+      groupIdx++;
       plan.push({ type: 'header' });
-      plan.push({ type: 'group_title', name: group });
+      plan.push({ type: 'group_title', name: `(${groupIdx})${group}` });
       if (safeGroups.has(group)) {
         plan.push({ type: 'safety_note', idx: 0 });
         plan.push({ type: 'safety_note', idx: 1 });
@@ -889,13 +891,22 @@ async function generateSmartQuote(data) {
   /* ── 행 스탬프 */
   const itemGRows = [];
   let mainGroupCounter = 0;
+  const mainGroups2 = [];
+  const subGroups2 = [];
+  let curMain2 = null, curSub2 = null;
   plan.forEach((p, i) => {
     const rn = insertAt + i;
     if (p.type === 'main_group') {
       mainGroupCounter++;
       stampRow(ws, rn, mainGroupSnap, { 1: mainGroupCounter, 2: p.name }, 9);
+      curMain2 = { rn, subRns: [], itemRns: [] };
+      mainGroups2.push(curMain2);
+      curSub2 = null;
     } else if (p.type === 'sub_group' && subGroupSnap) {
       stampRow(ws, rn, subGroupSnap, { 1: null, 2: p.name }, 9);
+      curSub2 = { rn, itemRns: [] };
+      subGroups2.push(curSub2);
+      if (curMain2) curMain2.subRns.push(rn);
     } else if (p.type === 'item') {
       const it    = p.item;
       const qty   = typeof it.qty === 'number' ? it.qty : (typeof it.quantity === 'number' ? it.quantity : 1);
@@ -916,8 +927,29 @@ async function generateSmartQuote(data) {
         ws.getRow(rn).getCell(7).numFmt = NUM_FMT;
         itemGRows.push(rn);
       }
+      if (curSub2) curSub2.itemRns.push(rn);
+      else if (curMain2) curMain2.itemRns.push(rn);
     }
   });
+
+  /* ── 소분류 SUM 수식 (해당 소분류 아이템들의 G열 합계) */
+  for (const sg of subGroups2) {
+    if (sg.itemRns.length > 0) {
+      const cell = ws.getRow(sg.rn).getCell(7);
+      cell.value = { formula: `SUM(G${sg.itemRns[0]}:G${sg.itemRns[sg.itemRns.length-1]})` };
+      cell.numFmt = NUM_FMT;
+    }
+  }
+  /* ── 대분류 SUM 수식 (소분류 G열 합계, 소분류 없으면 아이템 직접 합계) */
+  for (const mg of mainGroups2) {
+    const cell = ws.getRow(mg.rn).getCell(7);
+    if (mg.subRns.length > 0) {
+      cell.value = { formula: `SUM(${mg.subRns.map(r => `G${r}`).join(',')})` };
+    } else if (mg.itemRns.length > 0) {
+      cell.value = { formula: `SUM(G${mg.itemRns[0]}:G${mg.itemRns[mg.itemRns.length-1]})` };
+    }
+    cell.numFmt = NUM_FMT;
+  }
 
   /* ── footer 병합 복원 + 합계 행 수식 */
   const netShift = plan.length - deleteCount;
@@ -970,7 +1002,7 @@ async function generateSmartQuote(data) {
   /* ═══════════════════════════════════════════════════════════════════
      § 1)내역집계표 처리
      ─ 대분류·소분류별 합계 금액을 집계해 내역집계표에 삽입한다.
-     ─ 컬럼: A=번호 B-D=공종(병합) E=규격 F=단위 G=수량 H=공급단가 I=공급가액 J=비고 K=마커
+     ─ 컬럼: A=번호 B=공종 C=규격 D=단위 E=수량 F=공급단가 G=공급가액 H=비고 I=마커
   ═══════════════════════════════════════════════════════════════════ */
   const ws1 = wb.getWorksheet('1)내역집계표');
   if (ws1) {
@@ -1009,12 +1041,12 @@ async function generateSmartQuote(data) {
       ws1.columns.forEach((col, idx) => { if (col.width) colWidths1[idx + 1] = col.width; });
 
       /* ── 템플릿 스냅샷 */
-      const mainSnap1 = snapshotRow(ws1, m1.mainGroup, 11, themeColors);
-      const subSnap1  = m1.subGroup > 0 ? snapshotRow(ws1, m1.subGroup, 11, themeColors) : null;
+      const mainSnap1 = snapshotRow(ws1, m1.mainGroup, 9, themeColors);
+      const subSnap1  = m1.subGroup > 0 ? snapshotRow(ws1, m1.subGroup, 9, themeColors) : null;
 
       /* ── 소분류 스냅샷 fill 보정: theme=0(dk1=검정)은 "배경 없음"으로 처리 */
       if (subSnap1) {
-        for (let c = 1; c <= 11; c++) {
+        for (let c = 1; c <= 9; c++) {
           const cell = subSnap1.cells[c];
           if (cell && cell.fill && cell.fill.fgColor && cell.fill.fgColor.argb === 'FF000000') {
             cell.fill = undefined;
@@ -1035,7 +1067,7 @@ async function generateSmartQuote(data) {
            resolveThemeFill로 명시적 ARGB를 직접 지정한다. */
       if (themeColors) {
         const startR = ws1.getRow(m1.start);
-        for (let c = 1; c <= 11; c++) {
+        for (let c = 1; c <= 9; c++) {
           const cell = startR.getCell(c);
           if (cell.fill && cell.fill.fgColor && cell.fill.fgColor.theme != null) {
             cell.fill = resolveThemeFill(cell.fill, themeColors);
@@ -1095,22 +1127,20 @@ async function generateSmartQuote(data) {
       /* ── 행 스탬프 */
       let mainCounter1 = 0;
       const grandRefs1 = [];
+      let curMain1 = null;
+      const mainGroups1 = [];
       plan1.forEach((p, i) => {
         const rn = insertAt1 + i;
         if (p.type === 'main_group') {
           mainCounter1++;
-          const total = groupTotals[p.name]?.total || 0;
           stampRow(ws1, rn, mainSnap1, {
             1: mainCounter1,
             2: p.name,
-            7: 1,
-            8: total > 0 ? total : null,
-            9: total > 0 ? { formula: `H${rn}*G${rn}` } : null,
-          }, 11);
-          if (total > 0) { ws1.getRow(rn).getCell(8).numFmt = NUM_FMT; ws1.getRow(rn).getCell(9).numFmt = NUM_FMT; }
+          }, 9);
+          curMain1 = { rn, name: p.name, subRns: [] };
+          mainGroups1.push(curMain1);
           grandRefs1.push(rn);
         } else if (p.type === 'sub_group' && subSnap1) {
-          // 현재 소분류가 속한 대분류 이름 역추적
           let parentName = null;
           for (let j = i - 1; j >= 0; j--) {
             if (plan1[j].type === 'main_group') { parentName = plan1[j].name; break; }
@@ -1119,13 +1149,26 @@ async function generateSmartQuote(data) {
           stampRow(ws1, rn, subSnap1, {
             1: null,
             2: p.name,
-            7: 1,
-            8: subTotal > 0 ? subTotal : null,
-            9: subTotal > 0 ? { formula: `H${rn}*G${rn}` } : null,
-          }, 11);
-          if (subTotal > 0) { ws1.getRow(rn).getCell(8).numFmt = NUM_FMT; ws1.getRow(rn).getCell(9).numFmt = NUM_FMT; }
+            5: 1,
+            6: subTotal > 0 ? subTotal : null,
+            7: subTotal > 0 ? { formula: `F${rn}*E${rn}` } : null,
+          }, 9);
+          if (subTotal > 0) { ws1.getRow(rn).getCell(6).numFmt = NUM_FMT; ws1.getRow(rn).getCell(7).numFmt = NUM_FMT; }
+          if (curMain1) curMain1.subRns.push(rn);
         }
       });
+
+      /* ── 대분류 G열 = 소분류 G열 합계 수식 */
+      for (const mg of mainGroups1) {
+        const cell = ws1.getRow(mg.rn).getCell(7);
+        if (mg.subRns.length > 0) {
+          cell.value = { formula: `SUM(${mg.subRns.map(r => `G${r}`).join(',')})` };
+        } else {
+          const total = groupTotals[mg.name]?.total || 0;
+          cell.value = total > 0 ? total : null;
+        }
+        cell.numFmt = NUM_FMT;
+      }
 
       /* ── footer 병합 복원 + 합계 수식 */
       const netShift1 = plan1.length - deleteCount1;
@@ -1140,22 +1183,17 @@ async function generateSmartQuote(data) {
 
       if (m1.grandTotal > 0) {
         const gtRn1 = m1.grandTotal + netShift1;
-        const gtCell1 = ws1.getRow(gtRn1).getCell(9);
+        const gtCell1 = ws1.getRow(gtRn1).getCell(7);
         gtCell1.value  = grandRefs1.length > 0
-          ? { formula: `SUM(${grandRefs1.map(r => `I${r}`).join(',')})` }
+          ? { formula: `SUM(${grandRefs1.map(r => `G${r}`).join(',')})` }
           : 0;
         gtCell1.numFmt = NUM_FMT;
-        ws1.getRow(gtRn1).getCell(11).value = null;
+        ws1.getRow(gtRn1).getCell(9).value = null;
       }
 
       /* ── 헤더 행 높이 복원 */
       for (const [rn, h] of Object.entries(headerHeights1)) {
         ws1.getRow(Number(rn)).height = h;
-      }
-
-      /* ── 열 너비 복원 (템플릿 원본 유지) */
-      for (const [c, w] of Object.entries(colWidths1)) {
-        ws1.getColumn(Number(c)).width = w;
       }
 
       /* ── 잔여 마커 정리 */
@@ -1172,9 +1210,14 @@ async function generateSmartQuote(data) {
         ws1.spliceRows(markerRows1[i], 1);
       }
 
-      /* ── 인쇄 범위: J열까지만 (K열 이후 인쇄 제외) */
+      /* ── 열 너비 복원 (spliceRows 이후에 실행해야 리셋되지 않음) */
+      for (const [c, w] of Object.entries(colWidths1)) {
+        ws1.getColumn(Number(c)).width = w;
+      }
+
+      /* ── 인쇄 범위: H열까지만 (I열 마커 제외) */
       if (!ws1.pageSetup) ws1.pageSetup = {};
-      ws1.pageSetup.printArea = `A1:J${ws1.rowCount || 9999}`;
+      ws1.pageSetup.printArea = `A1:H${ws1.rowCount || 9999}`;
     }
   }
 

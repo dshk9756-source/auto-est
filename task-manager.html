@@ -1,0 +1,722 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>개인 업무 관리</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+input, select, textarea, button { font-family: inherit; }
+body { font-family: 'Segoe UI', -apple-system, sans-serif; background: #1a1a2e; color: #ffffff; max-width: 800px; margin: 0 auto; padding: 16px 16px 80px; }
+h1 { font-size: 1.3rem; margin-bottom: 12px; color: #ffffff; }
+
+.tabs { display: flex; gap: 4px; margin-bottom: 16px; }
+.tab-btn { flex: 1; padding: 10px; border: 1px solid #2e2e4e; background: #22223a; color: #ffffff; cursor: pointer; font-size: 0.9rem; border-radius: 6px 6px 0 0; transition: background 0.15s; }
+.tab-btn:hover { background: #2a2a4a; }
+.tab-btn.active { background: #3a6bc4; color: #fff; border-color: #3a6bc4; }
+.tab-content { display: none; }
+.tab-content.active { display: block; }
+
+.add-bar { display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
+.add-bar input[type="text"] { flex: 1; min-width: 120px; padding: 8px 10px; border: 1px solid #2e2e4e; border-radius: 4px; font-size: 0.9rem; background: #22223a; color: #ffffff; }
+.add-bar input[type="date"] { padding: 8px 10px; border: 1px solid #2e2e4e; border-radius: 4px; font-size: 0.9rem; background: #22223a; color: #ffffff; }
+.add-bar button, .btn { padding: 8px 14px; background: #3a6bc4; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: 0.9rem; white-space: nowrap; }
+.add-bar button:hover, .btn:hover { background: #4a7bd4; }
+.btn-sm { padding: 4px 8px; font-size: 0.8rem; }
+.btn-danger { background: #b03030; }
+.btn-danger:hover { background: #c04040; }
+.btn-restore { background: #2a6b3a; }
+.btn-restore:hover { background: #3a8b4a; }
+
+/* 메모 아이템 */
+.memo-item { background: #22223a; border: 1px solid #2e2e4e; border-radius: 6px; margin-bottom: 8px; overflow: hidden; transition: border-color 0.15s; }
+.memo-item.pinned { border-color: #c084fc; background: #251e36; }
+.memo-header { display: flex; align-items: center; gap: 8px; padding: 10px 12px; cursor: pointer; }
+.memo-header:hover { background: #2a2a46; }
+.pinned .memo-header:hover { background: #2e2540; }
+.pin-btn { background: none; border: none; cursor: pointer; font-size: 0.85rem; padding: 0 2px; opacity: 0.35; transition: opacity 0.15s; color: #fff; flex-shrink: 0; }
+.pin-btn:hover, .pinned .pin-btn { opacity: 1; }
+.memo-title { flex: 1; font-weight: 500; color: #ffffff; font-size: 0.85rem; }
+.memo-title-row { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.memo-title-display { flex: 1; font-weight: 500; color: #ffffff; font-size: 0.85rem; }
+.memo-title-editing { flex: 1; font-weight: 500; color: #ffffff; font-size: 0.85rem; background: #1a1a2e; border: 1px solid #3a6bc4; border-radius: 3px; padding: 2px 6px; outline: none; font-family: inherit; }
+.status-badge { font-size: 0.75rem; padding: 2px 6px; border-radius: 3px; cursor: pointer; user-select: none; transition: transform 0.1s; }
+.status-badge:hover { transform: scale(1.1); }
+.fstatus-discuss, .fstatus-invoice, .fstatus-done { cursor: pointer; user-select: none; transition: transform 0.1s; }
+.fstatus-discuss:hover, .fstatus-invoice:hover, .fstatus-done:hover { transform: scale(1.1); }
+.memo-meta { display: flex; align-items: center; gap: 6px; }
+.deadline-badge { font-size: 0.75rem; padding: 2px 6px; border-radius: 3px; background: #2e2e4e; color: #ffffff; }
+.deadline-badge.near { background: #3d3010; color: #e6c040; }
+.deadline-badge.overdue { background: #3d1010; color: #e06060; }
+.memo-arrow { display: none; }
+.memo-body { display: none; padding: 0 12px 12px; }
+.memo-item.open .memo-body { display: block; }
+.memo-body textarea { width: 100%; min-height: 160px; padding: 8px; border: 1px solid #2e2e4e; border-radius: 4px; font-size: 0.85rem; resize: none; font-family: inherit; overflow: hidden; background: #1a1a2e; color: #ffffff; }
+.memo-actions { display: flex; align-items: center; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
+.deadline-row { display: flex; align-items: center; gap: 6px; font-size: 0.85rem; }
+.deadline-row label { color: #ffffff; white-space: nowrap; }
+.deadline-row input[type="date"] { padding: 4px 6px; border: 1px solid #2e2e4e; border-radius: 4px; font-size: 0.85rem; background: #1a1a2e; color: #ffffff; }
+
+select { padding: 4px 8px; border: 1px solid #2e2e4e; border-radius: 4px; font-size: 0.85rem; background: #1a1a2e; color: #ffffff; }
+.status-before { color: #aaaacc; }
+.status-progress { color: #e6a23c; }
+.status-hold { color: #c084fc; }
+.status-done { color: #4caf72; }
+
+.month-selector { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
+.month-selector input[type="month"] { padding: 6px 8px; border: 1px solid #2e2e4e; border-radius: 4px; font-size: 0.85rem; background: #22223a; color: #ffffff; }
+.month-tag { padding: 4px 10px; border: 1px solid #3a6bc4; border-radius: 14px; font-size: 0.8rem; cursor: pointer; background: #22223a; color: #ffffff; }
+.month-tag:hover { background: #2a2a4a; }
+.month-tag.active { background: #3a6bc4; color: #fff; }
+
+.finance-form { display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
+.finance-form input { padding: 8px 10px; border: 1px solid #2e2e4e; border-radius: 4px; font-size: 0.85rem; background: #22223a; color: #ffffff; }
+.finance-form input[name="fname"] { flex: 1; min-width: 120px; }
+.finance-form input[name="famount"] { width: 130px; }
+.finance-amount-badge { font-size: 0.8rem; padding: 2px 8px; border-radius: 3px; background: #1e3a1e; color: #4caf72; font-weight: 600; white-space: nowrap; }
+.finance-month-badge { font-size: 0.75rem; padding: 2px 6px; border-radius: 3px; background: #2e2e4e; color: #aaaacc; white-space: nowrap; }
+.fstatus-discuss  { font-size: 0.75rem; padding: 2px 6px; border-radius: 3px; background: #3a2a10; color: #e6a23c; white-space: nowrap; }
+.fstatus-invoice  { font-size: 0.75rem; padding: 2px 6px; border-radius: 3px; background: #1e2e3a; color: #5aabdc; white-space: nowrap; }
+.fstatus-done     { font-size: 0.75rem; padding: 2px 6px; border-radius: 3px; background: #1e3a1e; color: #4caf72; white-space: nowrap; }
+.finance-total { text-align: right; font-weight: 600; margin-top: 8px; font-size: 0.95rem; color: #4caf72; }
+
+/* 휴지통 FAB */
+.trash-fab { position: fixed; bottom: 24px; right: 24px; width: 52px; height: 52px; border-radius: 50%; background: #3a2a2a; border: 1px solid #5a3a3a; color: #fff; font-size: 1.4rem; cursor: pointer; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 16px rgba(0,0,0,0.5); transition: background 0.15s; z-index: 100; }
+.trash-fab:hover { background: #5a2a2a; }
+.trash-fab .badge { position: absolute; top: -4px; right: -4px; background: #b03030; color: #fff; font-size: 0.65rem; min-width: 18px; height: 18px; border-radius: 9px; display: flex; align-items: center; justify-content: center; padding: 0 4px; font-weight: 700; }
+
+/* 모달 */
+.modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: 200; }
+.modal-overlay.open { display: flex; align-items: flex-end; justify-content: center; }
+.modal-box { background: #1e1e36; border: 1px solid #3a3a5a; border-radius: 12px 12px 0 0; width: 100%; max-width: 800px; max-height: 80vh; display: flex; flex-direction: column; }
+.modal-header { display: flex; align-items: center; padding: 14px 16px; border-bottom: 1px solid #2e2e4e; }
+.modal-header h2 { flex: 1; font-size: 1rem; }
+.modal-header-btns { display: flex; gap: 8px; align-items: center; }
+.modal-close { background: none; border: none; color: #aaa; font-size: 1.3rem; cursor: pointer; padding: 0 4px; }
+.modal-close:hover { color: #fff; }
+.modal-body { overflow-y: auto; padding: 16px; flex: 1; }
+
+.trash-item { background: #2a1f1f; border-color: #4e2e2e !important; }
+.trash-item .memo-header:hover { background: #341f1f; }
+.trash-info { font-size: 0.8rem; color: #aa8888; }
+.trash-origin { font-size: 0.75rem; color: #887777; padding: 4px 0 0; }
+
+.empty { text-align: center; color: #7070a0; padding: 32px; font-size: 0.9rem; }
+input::placeholder { color: #6060a0; }
+</style>
+</head>
+<body>
+
+<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+  <h1 style="margin-bottom:0">개인 업무 관리</h1>
+  <div style="display:flex;gap:6px;">
+    <button class="btn btn-sm" onclick="exportData()" title="데이터를 JSON 파일로 저장">💾 저장</button>
+    <button class="btn btn-sm" style="background:#2a4a2a" onclick="document.getElementById('import-file').click()" title="JSON 파일에서 불러오기">📂 불러오기</button>
+    <input type="file" id="import-file" accept=".json" style="display:none" onchange="importData(this)">
+  </div>
+</div>
+
+<div class="tabs">
+  <button class="tab-btn active" data-tab="daily">금일 업무</button>
+  <button class="tab-btn" data-tab="weekly">주간 업무</button>
+  <button class="tab-btn" data-tab="finance">매출 관리</button>
+  <button class="tab-btn" data-tab="sales">영업 업무</button>
+</div>
+
+<!-- 금일 업무 -->
+<div id="daily" class="tab-content active">
+  <div class="month-selector" id="daily-months"></div>
+  <div class="add-bar">
+    <input type="text" id="daily-input" placeholder="업무 제목 입력">
+    <input type="date" id="daily-deadline" title="마감기한">
+    <button class="btn" onclick="addMemo('daily')">추가</button>
+  </div>
+  <div id="daily-list"></div>
+</div>
+
+<!-- 주간 업무 -->
+<div id="weekly" class="tab-content">
+  <div class="month-selector" id="weekly-months"></div>
+  <div class="add-bar">
+    <input type="text" id="weekly-input" placeholder="업무 제목 입력">
+    <input type="date" id="weekly-deadline" title="마감기한">
+    <button class="btn" onclick="addMemo('weekly')">추가</button>
+  </div>
+  <div id="weekly-list"></div>
+</div>
+
+<!-- 매출 관리 -->
+<div id="finance" class="tab-content">
+  <div class="month-selector" id="finance-months"></div>
+  <div class="finance-form">
+    <input type="text" name="fname" id="finance-name" placeholder="항목명">
+    <input type="text" name="famount" id="finance-amount" placeholder="금액" oninput="commaInput(this)" inputmode="numeric">
+    <input type="month" id="finance-month">
+    <button class="btn" onclick="addFinance()">추가</button>
+  </div>
+  <div id="finance-list"></div>
+  <div class="finance-total" id="finance-total"></div>
+</div>
+
+<!-- 영업 업무 -->
+<div id="sales" class="tab-content">
+  <div class="month-selector" id="sales-months"></div>
+  <div class="add-bar">
+    <input type="text" id="sales-input" placeholder="업무 제목 입력">
+    <input type="date" id="sales-deadline" title="마감기한">
+    <button class="btn" onclick="addMemo('sales')">추가</button>
+  </div>
+  <div id="sales-list"></div>
+</div>
+
+<!-- 휴지통 FAB -->
+<button class="trash-fab" onclick="openTrash()" title="휴지통">🗑</button>
+
+<!-- 휴지통 모달 -->
+<div class="modal-overlay" id="trash-modal" onclick="closeTrashOnBg(event)">
+  <div class="modal-box">
+    <div class="modal-header">
+      <h2>🗑 휴지통</h2>
+      <div class="modal-header-btns">
+        <button class="btn btn-danger btn-sm" onclick="emptyTrash()">전체 영구삭제</button>
+        <button class="modal-close" onclick="closeTrash()">✕</button>
+      </div>
+    </div>
+    <div class="modal-body" id="trash-list"></div>
+  </div>
+</div>
+
+<script>
+const STORAGE_KEY = 'task-manager-data';
+const STATUS_LABELS = { before: '진행 전', progress: '진행 중', hold: '보류', done: '완료' };
+const STATUS_CLASS  = { before: 'status-before', progress: 'status-progress', hold: 'status-hold', done: 'status-done' };
+const TAB_LABELS      = { daily: '금일 업무', weekly: '주간 업무', finance: '매출 관리', sales: '영업 업무' };
+const FINANCE_STATUS  = { discuss: '협의중', invoice: '청구 예정', done: '계산서 발행' };
+const FINANCE_SCLASS  = { discuss: 'fstatus-discuss', invoice: 'fstatus-invoice', done: 'fstatus-done' };
+
+function load() {
+  try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) || defaultData(); }
+  catch { return defaultData(); }
+}
+function defaultData() {
+  return { daily: [], weekly: [], finance: [], sales: [], trash: [], selectedMonths: {} };
+}
+function save() { localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); }
+
+let data = load();
+if (!data.sales)  data.sales  = [];
+if (!data.trash)  data.trash  = [];
+
+function now() { return new Date(); }
+function monthKey(d) { return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`; }
+function prevMonth(d) { const p = new Date(d); p.setMonth(p.getMonth()-1); return p; }
+function formatMonth(key) { const [,m] = key.split('-'); return `${parseInt(m)}월`; }
+function formatAmount(n) { return Number(n).toLocaleString('ko-KR'); }
+function formatDate(iso) {
+  const d = new Date(iso);
+  return `${d.getFullYear()}.${String(d.getMonth()+1).padStart(2,'0')}.${String(d.getDate()).padStart(2,'0')} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+}
+function esc(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+
+const thisMonth = monthKey(now());
+const lastMonth = monthKey(prevMonth(now()));
+
+/* ── 월 선택 ── */
+function getSelectedMonths(tab) {
+  if (!data.selectedMonths[tab])
+    data.selectedMonths[tab] = tab === 'finance' ? [thisMonth] : [thisMonth, lastMonth];
+  return data.selectedMonths[tab];
+}
+function renderMonthSelector(tab) {
+  const container = document.getElementById(`${tab}-months`);
+  const selected  = getSelectedMonths(tab);
+  const all       = new Set(selected);
+  (tab === 'finance' ? data.finance : data[tab]).forEach(m => all.add(tab === 'finance' ? m.month : m.month));
+  all.add(thisMonth);
+  if (tab !== 'finance') all.add(lastMonth);
+  const sorted = [...all].sort().reverse();
+  container.innerHTML =
+    sorted.map(m => `<span class="month-tag ${selected.includes(m)?'active':''}" onclick="toggleMonth('${tab}','${m}')">${formatMonth(m)}</span>`).join('') +
+    `<input type="month" onchange="addMonth('${tab}',this.value);this.value='';" title="다른 월 추가">`;
+}
+function toggleMonth(tab, m) {
+  const sel = getSelectedMonths(tab), idx = sel.indexOf(m);
+  if (idx >= 0) sel.splice(idx, 1); else sel.push(m);
+  save(); render(tab);
+}
+function addMonth(tab, val) {
+  if (!val) return;
+  const sel = getSelectedMonths(tab);
+  if (!sel.includes(val)) sel.push(val);
+  save(); render(tab);
+}
+
+/* ── 마감기한 ── */
+function deadlineClass(s) {
+  if (!s) return '';
+  const today = new Date(); today.setHours(0,0,0,0);
+  const diff = Math.ceil((new Date(s) - today) / 86400000);
+  return diff < 0 ? 'overdue' : diff <= 3 ? 'near' : '';
+}
+function deadlineLabel(s) {
+  if (!s) return '';
+  const today = new Date(); today.setHours(0,0,0,0);
+  const diff = Math.ceil((new Date(s) - today) / 86400000);
+  const lbl = s.replace(/-/g, '/');
+  if (diff < 0)  return `마감 ${lbl} (${Math.abs(diff)}일 초과)`;
+  if (diff === 0) return `마감 ${lbl} (오늘)`;
+  if (diff <= 3)  return `마감 ${lbl} (D-${diff})`;
+  return `마감 ${lbl}`;
+}
+
+/* ── 메모 CRUD ── */
+function addMemo(tab) {
+  const input = document.getElementById(`${tab}-input`);
+  const dlInp = document.getElementById(`${tab}-deadline`);
+  const title = input.value.trim();
+  if (!title) return;
+  data[tab].unshift({ id: Date.now(), title, content: '', status: 'before', month: thisMonth,
+    deadline: dlInp ? dlInp.value : '', pinned: false, created: new Date().toISOString() });
+  input.value = '';
+  if (dlInp) dlInp.value = '';
+  save(); render(tab);
+}
+
+function sortedItems(tab) {
+  const sel = getSelectedMonths(tab);
+  const items = data[tab].filter(m => sel.includes(m.month));
+  const pinned   = items.filter(m => m.pinned);
+  const statusOrder = { progress: 0, before: 1, hold: 2, done: 3 };
+  const unpinned = items.filter(m => !m.pinned).sort((a, b) => (statusOrder[a.status] ?? 9) - (statusOrder[b.status] ?? 9));
+  return [...pinned, ...unpinned];
+}
+
+function renderMemos(tab) {
+  const list  = document.getElementById(`${tab}-list`);
+  const items = sortedItems(tab);
+  if (!items.length) { list.innerHTML = '<div class="empty">등록된 업무가 없습니다</div>'; return; }
+
+  list.innerHTML = items.map(m => {
+    const dl = m.deadline || '';
+    const dlLabel = deadlineLabel(dl);
+    const dlClass = deadlineClass(dl);
+    return `
+    <div class="memo-item${m.pinned?' pinned':''}" data-id="${m.id}">
+      <div class="memo-header" onclick="toggleMemo(event,'${tab}',${m.id})">
+        <button class="pin-btn" onclick="event.stopPropagation();togglePin('${tab}',${m.id})" title="${m.pinned?'고정 해제':'상단 고정'}">${m.pinned?'📌':'📍'}</button>
+        <span class="status-badge ${STATUS_CLASS[m.status]}" onclick="event.stopPropagation();cycleStatus('${tab}',${m.id},this)" title="클릭하여 상태 변경">${STATUS_LABELS[m.status]}</span>
+        <span class="memo-title">${esc(m.title)}</span>
+        <div class="memo-meta">
+          ${dlLabel ? `<span class="deadline-badge ${dlClass}">${dlLabel}</span>` : ''}
+          <span class="memo-arrow">&#9654;</span>
+        </div>
+      </div>
+      <div class="memo-body">
+        <div class="memo-title-row">
+          <span class="memo-title-display">${esc(m.title)}</span>
+          <button class="btn btn-sm" onclick="inlineEditTitle(this.previousElementSibling,'${tab}',${m.id})" style="padding:2px 8px;font-size:0.75rem;">수정</button>
+        </div>
+        <textarea placeholder="상세 내용 입력..." oninput="autoResize(this);updateMemo('${tab}',${m.id},'content',this.value)">${esc(m.content)}</textarea>
+        <div class="memo-actions">
+          <select onchange="updateMemo('${tab}',${m.id},'status',this.value)">
+            ${Object.entries(STATUS_LABELS).map(([k,v])=>`<option value="${k}"${m.status===k?' selected':''}>${v}</option>`).join('')}
+          </select>
+          <div class="deadline-row">
+            <label>마감기한</label>
+            <input type="date" value="${dl}" onchange="updateMemo('${tab}',${m.id},'deadline',this.value)">
+          </div>
+          <span style="flex:1"></span>
+          <button class="btn btn-sm btn-danger" onclick="deleteMemo('${tab}',${m.id})">삭제</button>
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function autoResize(el) {
+  const scrollY = window.scrollY;
+  el.style.height = 'auto';
+  el.style.height = el.scrollHeight + 'px';
+  window.scrollTo(0, scrollY);
+}
+
+function toggleMemo(event, tab, id) {
+  const header = event.currentTarget;
+  const memoEl = header.closest('.memo-item');
+  memoEl.classList.toggle('open');
+  if (memoEl.classList.contains('open')) {
+    const ta = memoEl.querySelector('textarea');
+    if (ta) autoResize(ta);
+  }
+}
+
+function togglePin(tab, id) {
+  const item = data[tab].find(m => m.id === id);
+  if (!item) return;
+  item.pinned = !item.pinned;
+  save(); render(tab);
+}
+
+function updateMemo(tab, id, field, value) {
+  const item = data[tab].find(m => m.id === id);
+  if (!item) return;
+  item[field] = value;
+  save();
+  if (field === 'status' || field === 'deadline') {
+    const openIds = [...document.querySelectorAll(`#${tab}-list .memo-item.open`)].map(el => parseInt(el.dataset.id));
+    render(tab);
+    openIds.forEach(oid => {
+      const el = document.querySelector(`#${tab}-list [data-id="${oid}"]`);
+      if (el) { el.classList.add('open'); const ta = el.querySelector('textarea'); if (ta) autoResize(ta); }
+    });
+  }
+}
+
+function deleteMemo(tab, id) {
+  const item = data[tab].find(m => m.id === id);
+  if (item) {
+    data.trash.unshift({ ...item, deletedFrom: tab, deletedAt: new Date().toISOString() });
+    data[tab] = data[tab].filter(m => m.id !== id);
+    save(); render(tab); updateTrashBadge();
+  }
+}
+
+/* ── 매출 관리 ── */
+function commaInput(el) {
+  const pos = el.selectionStart;
+  const before = el.value.length;
+  const raw = el.value.replace(/[^0-9]/g, '');
+  el.value = raw ? Number(raw).toLocaleString('ko-KR') : '';
+  const diff = el.value.length - before;
+  el.setSelectionRange(pos + diff, pos + diff);
+}
+function parseAmount(val) { return Number(String(val).replace(/[^0-9]/g, '')) || 0; }
+
+function addFinance() {
+  const name   = document.getElementById('finance-name').value.trim();
+  const amount = parseAmount(document.getElementById('finance-amount').value);
+  const month  = document.getElementById('finance-month').value || thisMonth;
+  if (!name || !amount) return;
+  data.finance.unshift({ id: Date.now(), name, amount, month, content: '', fstatus: 'discuss' });
+  document.getElementById('finance-name').value = '';
+  document.getElementById('finance-amount').value = '';
+  save(); render('finance');
+}
+
+function renderFinance() {
+  const list     = document.getElementById('finance-list');
+  const selected = getSelectedMonths('finance');
+  const items    = data.finance.filter(f => selected.includes(f.month));
+  if (!items.length) {
+    list.innerHTML = '<div class="empty">등록된 항목이 없습니다</div>';
+    document.getElementById('finance-total').textContent = '';
+    return;
+  }
+  const sorted = [...items].sort((a,b) => {
+    const aDown = (a.fstatus||'discuss') === 'done' ? 1 : 0;
+    const bDown = (b.fstatus||'discuss') === 'done' ? 1 : 0;
+    if (aDown !== bDown) return aDown - bDown;
+    return a.month.localeCompare(b.month) || a.id - b.id;
+  });
+  list.innerHTML = sorted.map(f => {
+    const fs = f.fstatus || 'discuss';
+    return `
+    <div class="memo-item" data-id="${f.id}">
+      <div class="memo-header" onclick="toggleMemoSimple(this)">
+        <span class="${FINANCE_SCLASS[fs]}" onclick="event.stopPropagation();cycleFinanceStatus(${f.id},this)" title="클릭하여 상태 변경">${FINANCE_STATUS[fs]}</span>
+        <span class="memo-title">${esc(f.name)}</span>
+        <div class="memo-meta">
+          <span class="finance-amount-badge">₩ ${formatAmount(f.amount)}</span>
+          <span class="finance-month-badge">${formatMonth(f.month)}</span>
+          <span class="memo-arrow">&#9654;</span>
+        </div>
+      </div>
+      <div class="memo-body">
+        <div class="memo-title-row">
+          <span class="memo-title-display">${esc(f.name)}</span>
+          <button class="btn btn-sm" onclick="inlineEditFinanceName(this.previousElementSibling,${f.id})" style="padding:2px 8px;font-size:0.75rem;">수정</button>
+        </div>
+        <textarea placeholder="세부 내용 입력..." oninput="autoResize(this);updateFinance(${f.id},'content',this.value)">${esc(f.content||'')}</textarea>
+        <div class="memo-actions">
+          <select onchange="updateFinance(${f.id},'fstatus',this.value)">
+            ${Object.entries(FINANCE_STATUS).map(([k,v]) => `<option value="${k}"${fs===k?' selected':''}>${v}</option>`).join('')}
+          </select>
+          <div class="deadline-row">
+            <label>금액</label>
+            <input type="text" value="${formatAmount(f.amount)}" style="width:130px" inputmode="numeric" oninput="commaInput(this)" onchange="updateFinance(${f.id},'amount',parseAmount(this.value))">
+          </div>
+          <div class="deadline-row">
+            <label>월</label>
+            <input type="month" value="${f.month}" onchange="updateFinance(${f.id},'month',this.value)">
+          </div>
+          <span style="flex:1"></span>
+          <button class="btn btn-sm btn-danger" onclick="deleteFinance(${f.id})">삭제</button>
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+  const total = items.reduce((s,f) => s + f.amount, 0);
+  document.getElementById('finance-total').textContent = `합계: ₩ ${formatAmount(total)}`;
+}
+
+function updateFinance(id, field, value) {
+  const item = data.finance.find(f => f.id === id);
+  if (item) { item[field] = value; save(); if (field !== 'content') render('finance'); }
+}
+
+function deleteFinance(id) {
+  const item = data.finance.find(f => f.id === id);
+  if (item) {
+    data.trash.unshift({ ...item, deletedFrom: 'finance', deletedAt: new Date().toISOString() });
+    data.finance = data.finance.filter(f => f.id !== id);
+    save(); render('finance'); updateTrashBadge();
+  }
+}
+
+/* ── 휴지통 ── */
+function updateTrashBadge() {}
+
+function openTrash() {
+  renderTrash();
+  document.getElementById('trash-modal').classList.add('open');
+}
+function closeTrash() {
+  document.getElementById('trash-modal').classList.remove('open');
+}
+function closeTrashOnBg(e) {
+  if (e.target === document.getElementById('trash-modal')) closeTrash();
+}
+
+function renderTrash() {
+  const list = document.getElementById('trash-list');
+  if (!data.trash.length) { list.innerHTML = '<div class="empty">휴지통이 비어 있습니다</div>'; return; }
+
+  list.innerHTML = data.trash.map(item => {
+    const isFinance  = item.deletedFrom === 'finance';
+    const originLabel = TAB_LABELS[item.deletedFrom] || item.deletedFrom;
+    const deletedAtLabel = item.deletedAt ? formatDate(item.deletedAt) : '';
+
+    if (isFinance) return `
+      <div class="memo-item trash-item" data-id="${item.id}">
+        <div class="memo-header" onclick="toggleMemo(event,null,null,this)">
+          <span class="memo-title">${esc(item.name)}</span>
+          <span class="memo-arrow">&#9654;</span>
+        </div>
+        <div class="memo-body">
+          <div class="trash-origin">출처: ${originLabel} &nbsp;|&nbsp; 금액: ₩ ${formatAmount(item.amount)} &nbsp;|&nbsp; 월: ${formatMonth(item.month)}</div>
+          <div class="memo-actions" style="margin-top:10px">
+            <span class="trash-info">삭제일시: ${deletedAtLabel}</span>
+            <span style="flex:1"></span>
+            <button class="btn btn-sm btn-restore" onclick="restoreItem(${item.id})">복원</button>
+            <button class="btn btn-sm btn-danger" onclick="permanentDelete(${item.id})">영구삭제</button>
+          </div>
+        </div>
+      </div>`;
+
+    const dl = item.deadline || '';
+    return `
+    <div class="memo-item trash-item" data-id="${item.id}">
+      <div class="memo-header" onclick="toggleMemoSimple(this)">
+        <span class="status-badge ${STATUS_CLASS[item.status]||''}">${STATUS_LABELS[item.status]||''}</span>
+        <span class="memo-title">${esc(item.title)}</span>
+        <div class="memo-meta">
+          ${deadlineLabel(dl) ? `<span class="deadline-badge ${deadlineClass(dl)}">${deadlineLabel(dl)}</span>` : ''}
+          <span class="memo-arrow">&#9654;</span>
+        </div>
+      </div>
+      <div class="memo-body">
+        <div class="trash-origin">출처: ${originLabel} &nbsp;|&nbsp; 월: ${formatMonth(item.month)}</div>
+        ${item.content ? `<textarea readonly style="margin-top:8px;opacity:0.7">${esc(item.content)}</textarea>` : ''}
+        <div class="memo-actions" style="margin-top:8px">
+          <span class="trash-info">삭제일시: ${deletedAtLabel}</span>
+          <span style="flex:1"></span>
+          <button class="btn btn-sm btn-restore" onclick="restoreItem(${item.id})">복원</button>
+          <button class="btn btn-sm btn-danger" onclick="permanentDelete(${item.id})">영구삭제</button>
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function toggleMemoSimple(header) {
+  const item = header.closest('.memo-item');
+  item.classList.toggle('open');
+  if (item.classList.contains('open')) {
+    const ta = item.querySelector('textarea');
+    if (ta) autoResize(ta);
+  }
+}
+
+function restoreItem(id) {
+  const item = data.trash.find(t => t.id === id);
+  if (!item) return;
+  const { deletedFrom, deletedAt, ...restored } = item;
+  if (data[deletedFrom]) {
+    data[deletedFrom].push(restored);
+    data.trash = data.trash.filter(t => t.id !== id);
+    save(); renderTrash(); updateTrashBadge();
+  }
+}
+function permanentDelete(id) {
+  data.trash = data.trash.filter(t => t.id !== id);
+  save(); renderTrash(); updateTrashBadge();
+}
+function emptyTrash() {
+  if (!data.trash.length) return;
+  if (!confirm(`휴지통을 비우면 복원할 수 없습니다.\n${data.trash.length}개 항목을 영구 삭제할까요?`)) return;
+  data.trash = [];
+  save(); renderTrash(); updateTrashBadge();
+}
+
+/* ── 인라인 편집 ── */
+function cycleStatus(tab, id, el) {
+  const item = data[tab].find(m => m.id === id);
+  if (!item) return;
+  const select = document.createElement('select');
+  select.style.cssText = 'font-size:0.75rem;padding:2px 4px;border-radius:3px;background:#1a1a2e;color:#fff;border:1px solid #3a6bc4;';
+  Object.entries(STATUS_LABELS).forEach(([k,v]) => {
+    const opt = document.createElement('option');
+    opt.value = k; opt.textContent = v;
+    if (k === item.status) opt.selected = true;
+    select.appendChild(opt);
+  });
+  el.replaceWith(select);
+  select.focus();
+  function commit() {
+    if (select.value !== item.status) { item.status = select.value; save(); }
+    render(tab);
+  }
+  select.addEventListener('change', commit);
+  select.addEventListener('blur', () => render(tab));
+}
+
+function cycleFinanceStatus(id, el) {
+  const item = data.finance.find(f => f.id === id);
+  if (!item) return;
+  const select = document.createElement('select');
+  select.style.cssText = 'font-size:0.75rem;padding:2px 4px;border-radius:3px;background:#1a1a2e;color:#fff;border:1px solid #3a6bc4;';
+  Object.entries(FINANCE_STATUS).forEach(([k,v]) => {
+    const opt = document.createElement('option');
+    opt.value = k; opt.textContent = v;
+    if (k === (item.fstatus || 'discuss')) opt.selected = true;
+    select.appendChild(opt);
+  });
+  el.replaceWith(select);
+  select.focus();
+  function commit() {
+    if (select.value !== item.fstatus) { item.fstatus = select.value; save(); }
+    render('finance');
+  }
+  select.addEventListener('change', commit);
+  select.addEventListener('blur', () => render('finance'));
+}
+
+function inlineEditTitle(el, tab, id) {
+  const item = data[tab].find(m => m.id === id);
+  if (!item) return;
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.className = 'memo-title-editing';
+  input.value = item.title;
+  el.replaceWith(input);
+  input.focus();
+  input.select();
+  function commit() {
+    const val = input.value.trim();
+    if (val && val !== item.title) { item.title = val; save(); }
+    render(tab);
+  }
+  input.addEventListener('blur', commit);
+  input.addEventListener('keydown', e => {
+    if (e.key === 'Enter') { e.preventDefault(); input.blur(); }
+    if (e.key === 'Escape') { input.value = item.title; input.blur(); }
+  });
+}
+
+function inlineEditFinanceName(el, id) {
+  const item = data.finance.find(f => f.id === id);
+  if (!item) return;
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.className = 'memo-title-editing';
+  input.value = item.name;
+  el.replaceWith(input);
+  input.focus();
+  input.select();
+  function commit() {
+    const val = input.value.trim();
+    if (val && val !== item.name) { item.name = val; save(); }
+    render('finance');
+  }
+  input.addEventListener('blur', commit);
+  input.addEventListener('keydown', e => {
+    if (e.key === 'Enter') { e.preventDefault(); input.blur(); }
+    if (e.key === 'Escape') { input.value = item.name; input.blur(); }
+  });
+}
+
+/* ── 렌더 / 탭 ── */
+function render(tab) {
+  renderMonthSelector(tab);
+  if (tab === 'finance') renderFinance();
+  else {
+    renderMemos(tab);
+    document.querySelectorAll(`#${tab}-list .memo-item.open textarea`).forEach(autoResize);
+  }
+}
+
+document.querySelectorAll('.tab-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById(btn.dataset.tab).classList.add('active');
+    render(btn.dataset.tab);
+  });
+});
+
+['daily','weekly','sales'].forEach(tab => {
+  document.getElementById(`${tab}-input`).addEventListener('keydown', e => { if (e.key === 'Enter') addMemo(tab); });
+});
+
+document.getElementById('finance-month').value = thisMonth;
+
+function exportData() {
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a');
+  const d = new Date();
+  const filename = `업무관리_${d.getFullYear()}${String(d.getMonth()+1).padStart(2,'0')}${String(d.getDate()).padStart(2,'0')}.json`;
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+function importData(input) {
+  const file = input.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = e => {
+    try {
+      const imported = JSON.parse(e.target.result);
+      if (!imported.daily || !imported.finance) { alert('올바른 백업 파일이 아닙니다.'); return; }
+      if (!confirm('현재 데이터를 불러온 파일로 덮어씁니다. 계속할까요?')) return;
+      data = imported;
+      save();
+      ['daily','weekly','finance','sales'].forEach(render);
+      updateTrashBadge();
+      alert('불러오기 완료!');
+    } catch { alert('파일을 읽는 중 오류가 발생했습니다.'); }
+  };
+  reader.readAsText(file);
+  input.value = '';
+}
+
+render('daily');
+render('weekly');
+render('finance');
+render('sales');
+updateTrashBadge();
+</script>
+</body>
+</html>

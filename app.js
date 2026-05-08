@@ -45,6 +45,10 @@ function normRowKeys(row) {
       o.name = v;
       continue;
     }
+    if (key === "카테고리" || key === "category" || key === "cat") {
+      o.cat = v;
+      continue;
+    }
     if (key === "품목명" || key === "itemname" || key === "name") {
       // SetMembers는 n, Items는 name을 기대
       o.name = v;
@@ -95,11 +99,12 @@ function cellNum(v) {
 function catalogFromWorkbook(wb) {
   const X = typeof XLSX !== "undefined" ? XLSX : null;
   if (!X || !wb || !wb.Sheets) throw new Error("XLSX 워크북이 없습니다");
-  const setsSh = wb.Sheets.Sets;
-  const memSh = wb.Sheets.SetMembers;
-  const itemsSh = wb.Sheets.Items;
-  const notesSh = wb.Sheets.Notes_Default;
-  if (!setsSh || !memSh || !itemsSh) throw new Error("시트 Sets, SetMembers, Items 가 필요합니다");
+  const S = wb.Sheets;
+  const setsSh = S['세트목록'] || S.Sets;
+  const memSh = S['세트구성'] || S.SetMembers;
+  const itemsSh = S['단품목록'] || S.Items;
+  const notesSh = S['비고기본값'] || S.Notes_Default;
+  if (!setsSh || !memSh || !itemsSh) throw new Error("시트 세트목록, 세트구성, 단품목록 이 필요합니다");
 
   const setRows = X.utils.sheet_to_json(setsSh, { defval: "" }).map(normRowKeys);
   const memRows = X.utils.sheet_to_json(memSh, { defval: "" }).map(normRowKeys);
@@ -182,8 +187,8 @@ function catalogFromWorkbook(wb) {
   }
 
   // SmartGroups / SmartItems 파싱
-  const sgSh = wb.Sheets.SmartGroups;
-  const siSh = wb.Sheets.SmartItems;
+  const sgSh = S['스마트그룹'] || S.SmartGroups;
+  const siSh = S['스마트항목'] || S.SmartItems;
   let smartGroups = [];
   if (sgSh && siSh) {
     const sgRows = X.utils.sheet_to_json(sgSh, {defval:''}).map(r => {
@@ -191,8 +196,8 @@ function catalogFromWorkbook(wb) {
       for (const k of Object.keys(r)) {
         const key = String(k).trim().toLowerCase();
         const v = r[k];
-        if (key === 'group_id')   { o.id  = v; continue; }
-        if (key === 'group_name') { o.name = v; continue; }
+        if (key === 'group_id' || key === '그룹id' || key === '그룹_id')   { o.id  = v; continue; }
+        if (key === 'group_name' || key === '그룹명') { o.name = v; continue; }
         if (key === 'cat' || key === '카테고리') { o.cat = v; continue; }
         if (key === 'sort' || key === '순서')    { o.sort = cellNum(v); continue; }
         o[key] = v;
@@ -204,11 +209,11 @@ function catalogFromWorkbook(wb) {
       for (const k of Object.keys(r)) {
         const key = String(k).trim().toLowerCase();
         const v = r[k];
-        if (key === 'group_id')   { o.group_id = v; continue; }
+        if (key === 'group_id' || key === '그룹id' || key === '그룹_id')   { o.group_id = v; continue; }
         if (key === '설명' || key === 'description') { o.desc = v; continue; }
-        if (key === 'items_id' || key === 'item_id') { o.item_id = v; continue; }
+        if (key === 'items_id' || key === 'item_id' || key === '품목id' || key === '품목_id') { o.item_id = v; continue; }
         if (key === '소분류' || key === 'sub_cat' || key === 'subcat' || key === 'sub_group') { o.cat = cellStr(v).trim(); continue; }
-        if (key === 'name')       { o.name = v; continue; }
+        if (key === 'name' || key === '품목명')       { o.name = v; continue; }
         if (key === '규격' || key === 'spec')    { o.spec = v; continue; }
         if (key === '단위' || key === 'unit')    { o.unit = cellStr(v).trim(); continue; }
         if (key === '수량' || key === 'quantity' || key === 'qty') { o.qty = cellNum(v); continue; }
@@ -494,7 +499,7 @@ function renderCart(){
     }else if(c.type==='smart_group'){
       html+=`<div class="ci">
         <div class="ci-top"><div class="ci-name">${c.name}</div><button class="ci-rm" onclick="rmCart('${id}')">×</button></div>
-        <div class="ci-row"><span class="ci-tag" style="background:var(--sig);color:#000">스마트</span><span style="font-family:var(--mono);font-size:12px;color:var(--ice)">${c.totalPrice>0?N(c.totalPrice)+' 원':'별도협의'}</span></div>
+        <div class="ci-row"><span class="ci-tag" style="background:var(--sigbg);color:var(--sig);border:1px solid var(--sigbdr)">스마트</span><span style="font-family:var(--mono);font-size:12px;color:var(--ice)">${c.totalPrice>0?N(c.totalPrice)+' 원':'별도협의'}</span></div>
         <div style="font-size:10px;color:var(--mist);margin-top:4px">${c.items.length}개 품목 포함</div>
       </div>`;
     }else{

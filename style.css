@@ -31,6 +31,12 @@
   --green:    #10B981;
   --greenbg:  rgba(16,185,129,0.08);
   --greenbdr: rgba(16,185,129,0.25);
+  --sig:      #22D3EE;
+  --sigbdr:   rgba(34,211,238,0.25);
+  --sigbg:    rgba(34,211,238,0.08);
+  --ice:      #93C5FD;
+  --mist:     #9CA3AF;
+  --mist2:    #6B7280;
 
   /* ─ Typography ─ */
   --body: 'Pretendard', 'Noto Sans KR', -apple-system, sans-serif;

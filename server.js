@@ -50,10 +50,11 @@ const server = http.createServer((req, res) => {
 
     /* ── POST /api/generate-excel : 엑셀 견적서 생성 ── */
     if (req.method === 'POST' && pathname === '/api/generate-excel') {
-      let body = '';
-      req.on('data', chunk => { body += chunk; });
+      const chunks = [];
+      req.on('data', chunk => { chunks.push(chunk); });
       req.on('end', async () => {
         try {
+          const body = Buffer.concat(chunks).toString('utf8');
           const data   = JSON.parse(body);
           const isSmartTpl = data.template && data.template.includes('스마트');
           const buffer = await (isSmartTpl ? generateSmartQuote(data) : generateQuote(data));

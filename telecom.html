@@ -1,0 +1,486 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>통신비 관리 시스템</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: 'Segoe UI', 'Malgun Gothic', sans-serif; background: #f0f2f5; color: #333; }
+
+.header { background: linear-gradient(135deg, #1a237e, #283593); color: #fff; padding: 20px 32px; display: flex; align-items: center; justify-content: space-between; box-shadow: 0 2px 8px rgba(0,0,0,.15); }
+.header h1 { font-size: 22px; font-weight: 700; }
+.header .subtitle { font-size: 13px; opacity: .8; margin-top: 2px; }
+
+.tabs { display: flex; background: #fff; border-bottom: 2px solid #e0e0e0; padding: 0 24px; }
+.tab { padding: 14px 24px; cursor: pointer; font-size: 14px; font-weight: 600; color: #666; border-bottom: 3px solid transparent; transition: all .2s; }
+.tab:hover { color: #1a237e; }
+.tab.active { color: #1a237e; border-bottom-color: #1a237e; }
+
+.content { padding: 24px; max-width: 1600px; margin: 0 auto; width: 100%; }
+.page { display: none; }
+.page.active { display: block; }
+
+/* Dashboard cards */
+.stats-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 24px; }
+.stat-card { background: #fff; border-radius: 12px; padding: 20px; box-shadow: 0 1px 4px rgba(0,0,0,.08); }
+.stat-card .label { font-size: 12px; color: #888; margin-bottom: 6px; text-transform: uppercase; letter-spacing: .5px; }
+.stat-card .value { font-size: 28px; font-weight: 700; }
+.stat-card .value.blue { color: #1a237e; }
+.stat-card .value.green { color: #2e7d32; }
+.stat-card .value.orange { color: #e65100; }
+.stat-card .value.red { color: #c62828; }
+.stat-card .value.purple { color: #6a1b9a; }
+
+/* Charts area */
+.charts-row { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 24px; }
+.chart-card { background: #fff; border-radius: 12px; padding: 20px; box-shadow: 0 1px 4px rgba(0,0,0,.08); }
+.chart-card h3 { font-size: 15px; margin-bottom: 16px; color: #333; }
+
+.bar-chart { display: flex; flex-direction: column; gap: 10px; }
+.bar-row { display: flex; align-items: center; gap: 12px; }
+.bar-label { width: 80px; font-size: 13px; text-align: right; flex-shrink: 0; }
+.bar-track { flex: 1; background: #f0f0f0; border-radius: 6px; height: 28px; position: relative; overflow: hidden; }
+.bar-fill { height: 100%; border-radius: 6px; display: flex; align-items: center; padding-left: 10px; font-size: 12px; color: #fff; font-weight: 600; transition: width .6s ease; }
+.bar-value { margin-left: 8px; font-size: 13px; font-weight: 600; flex-shrink: 0; }
+
+/* Donut chart */
+.donut-container { display: flex; align-items: center; gap: 24px; }
+.donut-svg { width: 160px; height: 160px; }
+.donut-legend { display: flex; flex-direction: column; gap: 8px; }
+.legend-item { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+.legend-dot { width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0; }
+
+/* Filter bar */
+.filter-bar { display: flex; gap: 12px; margin-bottom: 20px; flex-wrap: wrap; align-items: center; }
+.filter-bar select, .filter-bar input { padding: 8px 14px; border: 1px solid #ddd; border-radius: 8px; font-size: 13px; background: #fff; outline: none; }
+.filter-bar select:focus, .filter-bar input:focus { border-color: #1a237e; }
+.filter-bar input { width: 280px; }
+.filter-label { font-size: 12px; color: #888; margin-right: -6px; }
+
+/* Table */
+.table-wrapper { background: #fff; border-radius: 12px; box-shadow: 0 1px 4px rgba(0,0,0,.08); overflow: hidden; }
+.table-scroll { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+thead th { background: #f5f5f5; padding: 12px 14px; text-align: left; font-weight: 600; color: #555; border-bottom: 2px solid #e0e0e0; white-space: nowrap; position: sticky; top: 0; }
+tbody td { padding: 10px 14px; border-bottom: 1px solid #f0f0f0; white-space: nowrap; }
+tbody tr:hover { background: #f8f9ff; }
+
+.badge { display: inline-block; padding: 3px 10px; border-radius: 12px; font-size: 11px; font-weight: 600; }
+.badge-billing { background: #e3f2fd; color: #1565c0; }
+.badge-done { background: #e8f5e9; color: #2e7d32; }
+.badge-unbilled { background: #fff3e0; color: #e65100; }
+.badge-unknown { background: #f5f5f5; color: #999; }
+
+.carrier-tag { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 700; }
+.carrier-lg { background: #e91e63; color: #fff; }
+.carrier-kt { background: #ff5722; color: #fff; }
+.carrier-skt { background: #f44336; color: #fff; }
+
+/* Dashboard table */
+.dash-table-section { margin-top: 24px; }
+.dash-table-section h3 { font-size: 15px; margin-bottom: 12px; }
+
+.table-info { padding: 12px 16px; font-size: 13px; color: #666; display: flex; justify-content: space-between; align-items: center; }
+
+/* Site detail */
+.site-detail-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(350px, 1fr)); gap: 16px; }
+.site-card { background: #fff; border-radius: 12px; padding: 18px; box-shadow: 0 1px 4px rgba(0,0,0,.08); cursor: pointer; transition: box-shadow .2s; border-left: 4px solid #1a237e; }
+.site-card:hover { box-shadow: 0 4px 12px rgba(0,0,0,.12); }
+.site-card .site-name { font-size: 16px; font-weight: 700; margin-bottom: 4px; }
+.site-card .site-constructor { font-size: 12px; color: #888; margin-bottom: 10px; }
+.site-card .site-info-row { display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 4px; }
+
+/* Modal */
+.modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.5); z-index: 1000; align-items: center; justify-content: center; }
+.modal-overlay.show { display: flex; }
+.modal { background: #fff; border-radius: 16px; width: 90%; max-width: 1000px; max-height: 85vh; overflow-y: auto; padding: 28px; }
+.modal h2 { font-size: 20px; margin-bottom: 16px; }
+.modal-close { float: right; font-size: 24px; cursor: pointer; color: #888; background: none; border: none; }
+.modal-close:hover { color: #333; }
+
+/* Export button */
+.btn { padding: 8px 18px; background: #1a237e; color: #fff; border: none; border-radius: 8px; font-size: 13px; cursor: pointer; font-weight: 600; }
+.btn:hover { background: #283593; }
+.btn-outline { background: transparent; color: #1a237e; border: 1px solid #1a237e; }
+.btn-outline:hover { background: #e8eaf6; }
+
+@media (max-width: 768px) {
+  .charts-row { grid-template-columns: 1fr; }
+  .stats-row { grid-template-columns: 1fr 1fr; }
+  .header { padding: 16px; }
+  .content { padding: 16px; }
+  .filter-bar input { width: 100%; }
+}
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div>
+    <h1>통신비 관리 시스템</h1>
+    <div class="subtitle">오픈웍스 CCTV 통신 회선 현황</div>
+  </div>
+  <div style="font-size:13px;opacity:.7" id="lastUpdated"></div>
+</div>
+
+<div class="tabs">
+  <div class="tab active" onclick="switchTab('dashboard')">대시보드</div>
+  <div class="tab" onclick="switchTab('sites')">현장별 현황</div>
+  <div class="tab" onclick="switchTab('detail')">상세 내역</div>
+</div>
+
+<div class="content">
+  <!-- Dashboard page -->
+  <div id="page-dashboard" class="page active">
+    <div class="stats-row" id="statsRow"></div>
+    <div class="charts-row">
+      <div class="chart-card">
+        <h3>통신사별 회선 수</h3>
+        <div id="carrierChart" class="bar-chart"></div>
+      </div>
+      <div class="chart-card">
+        <h3>정산상태 분포</h3>
+        <div id="statusChart" class="donut-container"></div>
+      </div>
+    </div>
+    <div class="charts-row">
+      <div class="chart-card">
+        <h3>건설사별 회선 수 (상위 10)</h3>
+        <div id="constructorChart" class="bar-chart"></div>
+      </div>
+      <div class="chart-card">
+        <h3>청구 예정 현장</h3>
+        <div id="upcomingBilling" style="max-height:300px;overflow-y:auto"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Sites page -->
+  <div id="page-sites" class="page">
+    <div class="filter-bar">
+      <span class="filter-label">통신사</span>
+      <select id="siteCarrierFilter" onchange="renderSites()">
+        <option value="">전체</option>
+      </select>
+      <span class="filter-label">정산상태</span>
+      <select id="siteStatusFilter" onchange="renderSites()">
+        <option value="">전체</option>
+      </select>
+      <input type="text" id="siteSearchInput" placeholder="현장명 또는 건설사 검색..." oninput="renderSites()">
+    </div>
+    <div id="siteCards" class="site-detail-cards"></div>
+  </div>
+
+  <!-- Detail page -->
+  <div id="page-detail" class="page">
+    <div class="filter-bar">
+      <span class="filter-label">통신사</span>
+      <select id="carrierFilter" onchange="renderTable()">
+        <option value="">전체</option>
+        <option value="LG">LG</option>
+        <option value="KT">KT</option>
+        <option value="SKT">SKT</option>
+      </select>
+      <span class="filter-label">정산상태</span>
+      <select id="statusFilter" onchange="renderTable()">
+        <option value="">전체</option>
+        <option value="청구중">청구중</option>
+        <option value="완료">완료</option>
+        <option value="미청구">미청구</option>
+      </select>
+      <input type="text" id="searchInput" placeholder="현장명, 건설사, 사용처 검색..." oninput="renderTable()">
+      <button class="btn-outline btn" onclick="exportCSV()">CSV 다운로드</button>
+    </div>
+    <div class="table-wrapper">
+      <div class="table-info">
+        <span id="tableCount"></span>
+      </div>
+      <div class="table-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>No.</th>
+              <th>통신사</th>
+              <th>현장명</th>
+              <th>사용처</th>
+              <th>상품/요금제</th>
+              <th>약정</th>
+              <th>개통일</th>
+              <th>계약만료</th>
+              <th>정산상태</th>
+              <th>청구방법</th>
+              <th>마지막청구</th>
+              <th>다음청구</th>
+              <th>건설사명</th>
+              <th>비고</th>
+            </tr>
+          </thead>
+          <tbody id="detailBody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Modal -->
+<div class="modal-overlay" id="modalOverlay" onclick="if(event.target===this)closeModal()">
+  <div class="modal">
+    <button class="modal-close" onclick="closeModal()">&times;</button>
+    <div id="modalContent"></div>
+  </div>
+</div>
+
+<script>
+let DATA = { detail: [], dashboard: [] };
+
+function loadData() {
+  fetch('telecom_data.json')
+    .then(r => r.json())
+    .then(d => { DATA = d; init(); })
+    .catch(() => alert('telecom_data.json 파일을 로드할 수 없습니다.'));
+}
+
+function init() {
+  document.getElementById('lastUpdated').textContent = '데이터 기준: ' + new Date().toLocaleDateString('ko-KR');
+  renderDashboard();
+  populateSiteFilters();
+  renderSites();
+  renderTable();
+}
+
+function switchTab(name) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  event.target.classList.add('active');
+  document.getElementById('page-' + name).classList.add('active');
+}
+
+function getStatusBadge(status) {
+  if (!status) return '<span class="badge badge-unknown">-</span>';
+  if (status.includes('청구중')) return '<span class="badge badge-billing">청구중</span>';
+  if (status.includes('완료')) return '<span class="badge badge-done">완료</span>';
+  if (status.includes('미청구')) return '<span class="badge badge-unbilled">미청구</span>';
+  return '<span class="badge badge-unknown">' + status + '</span>';
+}
+
+function getCarrierTag(carrier) {
+  if (!carrier) return '';
+  const c = carrier.toUpperCase();
+  if (c.includes('LG')) return '<span class="carrier-tag carrier-lg">LG</span>';
+  if (c.includes('KT')) return '<span class="carrier-tag carrier-kt">KT</span>';
+  if (c.includes('SKT')) return '<span class="carrier-tag carrier-skt">SKT</span>';
+  return '<span class="carrier-tag" style="background:#607d8b;color:#fff">' + carrier + '</span>';
+}
+
+function renderDashboard() {
+  const d = DATA.detail;
+  const totalLines = d.length;
+  const billing = d.filter(r => String(r.settlementStatus).includes('청구중')).length;
+  const done = d.filter(r => String(r.settlementStatus).includes('완료')).length;
+  const unbilled = d.filter(r => String(r.settlementStatus).includes('미청구')).length;
+  const sites = [...new Set(d.map(r => r.site).filter(Boolean))].length;
+
+  document.getElementById('statsRow').innerHTML = `
+    <div class="stat-card"><div class="label">전체 회선 수</div><div class="value blue">${totalLines}</div></div>
+    <div class="stat-card"><div class="label">현장 수</div><div class="value purple">${sites}</div></div>
+    <div class="stat-card"><div class="label">청구중</div><div class="value orange">${billing}</div></div>
+    <div class="stat-card"><div class="label">정산완료</div><div class="value green">${done}</div></div>
+    <div class="stat-card"><div class="label">미청구</div><div class="value red">${unbilled}</div></div>
+  `;
+
+  // Carrier bar chart
+  const carriers = {};
+  d.forEach(r => {
+    const c = r.carrier || '기타';
+    carriers[c] = (carriers[c] || 0) + 1;
+  });
+  const maxCarrier = Math.max(...Object.values(carriers));
+  const colors = { LG: '#e91e63', KT: '#ff5722', SKT: '#f44336' };
+  document.getElementById('carrierChart').innerHTML = Object.entries(carriers)
+    .sort((a, b) => b[1] - a[1])
+    .map(([k, v]) => `
+      <div class="bar-row">
+        <div class="bar-label">${k}</div>
+        <div class="bar-track"><div class="bar-fill" style="width:${v/maxCarrier*100}%;background:${colors[k]||'#607d8b'}">${v}</div></div>
+      </div>`).join('');
+
+  // Status donut chart
+  const statusData = [
+    { label: '청구중', value: billing, color: '#1565c0' },
+    { label: '완료', value: done, color: '#2e7d32' },
+    { label: '미청구', value: unbilled, color: '#e65100' },
+    { label: '기타', value: totalLines - billing - done - unbilled, color: '#bdbdbd' }
+  ].filter(s => s.value > 0);
+
+  const total = statusData.reduce((s, x) => s + x.value, 0);
+  let cumulative = 0;
+  const radius = 60, cx = 80, cy = 80, strokeWidth = 24;
+  const circumference = 2 * Math.PI * radius;
+
+  let circles = '';
+  statusData.forEach(s => {
+    const pct = s.value / total;
+    const dashArray = `${pct * circumference} ${circumference}`;
+    const offset = -cumulative * circumference;
+    circles += `<circle cx="${cx}" cy="${cy}" r="${radius}" fill="none" stroke="${s.color}" stroke-width="${strokeWidth}" stroke-dasharray="${dashArray}" stroke-dashoffset="${offset}" transform="rotate(-90 ${cx} ${cy})"/>`;
+    cumulative += pct;
+  });
+
+  const legend = statusData.map(s => `
+    <div class="legend-item">
+      <div class="legend-dot" style="background:${s.color}"></div>
+      ${s.label}: ${s.value}건 (${(s.value/total*100).toFixed(1)}%)
+    </div>`).join('');
+
+  document.getElementById('statusChart').innerHTML = `
+    <svg class="donut-svg" viewBox="0 0 160 160">${circles}
+      <text x="${cx}" y="${cy}" text-anchor="middle" dy="5" font-size="18" font-weight="700" fill="#333">${total}</text>
+      <text x="${cx}" y="${cy+16}" text-anchor="middle" font-size="10" fill="#888">전체</text>
+    </svg>
+    <div class="donut-legend">${legend}</div>`;
+
+  // Constructor bar chart
+  const constructors = {};
+  d.forEach(r => {
+    const c = r.constructor || '미지정';
+    if (c) constructors[c] = (constructors[c] || 0) + 1;
+  });
+  const sortedConst = Object.entries(constructors).sort((a, b) => b[1] - a[1]).slice(0, 10);
+  const maxConst = sortedConst[0]?.[1] || 1;
+  const constColors = ['#1a237e','#283593','#303f9f','#3949ab','#3f51b5','#5c6bc0','#7986cb','#9fa8da','#c5cae9','#e8eaf6'];
+  document.getElementById('constructorChart').innerHTML = sortedConst.map(([k, v], i) => `
+    <div class="bar-row">
+      <div class="bar-label" style="width:120px;font-size:12px">${k}</div>
+      <div class="bar-track"><div class="bar-fill" style="width:${v/maxConst*100}%;background:${constColors[i]}">${v}</div></div>
+    </div>`).join('');
+
+  // Upcoming billing
+  const upcoming = DATA.dashboard.filter(r => r.nextBilling).sort((a, b) => {
+    const av = parseFloat(a.nextBilling) || 99;
+    const bv = parseFloat(b.nextBilling) || 99;
+    return av - bv;
+  });
+  document.getElementById('upcomingBilling').innerHTML = upcoming.length
+    ? '<table style="width:100%"><thead><tr><th>현장</th><th>건설사</th><th>다음청구</th><th>상태</th></tr></thead><tbody>'
+      + upcoming.map(r => `<tr><td>${r.site}</td><td>${r.constructor}</td><td>${r.nextBilling}</td><td>${getStatusBadge(r.status)}</td></tr>`).join('')
+      + '</tbody></table>'
+    : '<p style="color:#888;text-align:center;padding:20px">청구 예정 데이터 없음</p>';
+}
+
+function populateSiteFilters() {
+  const carriers = [...new Set(DATA.dashboard.map(r => r.carrier).filter(Boolean))].sort();
+  const statuses = [...new Set(DATA.dashboard.map(r => r.status).filter(Boolean))];
+  const cf = document.getElementById('siteCarrierFilter');
+  carriers.forEach(c => { const o = document.createElement('option'); o.value = c; o.textContent = c; cf.appendChild(o); });
+  const sf = document.getElementById('siteStatusFilter');
+  statuses.forEach(s => { const o = document.createElement('option'); o.value = s; o.textContent = s; sf.appendChild(o); });
+}
+
+function renderSites() {
+  const carrier = document.getElementById('siteCarrierFilter').value;
+  const status = document.getElementById('siteStatusFilter').value;
+  const search = document.getElementById('siteSearchInput').value.toLowerCase();
+
+  let filtered = DATA.dashboard;
+  if (carrier) filtered = filtered.filter(r => r.carrier.includes(carrier.replace('전체','')));
+  if (status) filtered = filtered.filter(r => r.status.includes(status));
+  if (search) filtered = filtered.filter(r => (r.site + r.constructor).toLowerCase().includes(search));
+
+  const borderColors = { '완료': '#2e7d32', '청구중': '#1565c0', '미청구': '#e65100' };
+
+  document.getElementById('siteCards').innerHTML = filtered.map(r => {
+    const bc = Object.entries(borderColors).find(([k]) => r.status.includes(k));
+    return `
+    <div class="site-card" style="border-left-color:${bc ? bc[1] : '#999'}" onclick="showSiteDetail('${r.site.replace(/'/g,"\\'")}')">
+      <div class="site-name">${r.site}</div>
+      <div class="site-constructor">${r.constructor || '-'}</div>
+      <div class="site-info-row"><span>통신사</span><span>${r.carrier}</span></div>
+      <div class="site-info-row"><span>회선 수</span><span><strong>${r.lineCount}</strong></span></div>
+      <div class="site-info-row"><span>정산상태</span><span>${getStatusBadge(r.status)}</span></div>
+      <div class="site-info-row"><span>다음 청구</span><span>${r.nextBilling || '-'}</span></div>
+    </div>`;
+  }).join('');
+}
+
+function showSiteDetail(siteName) {
+  const lines = DATA.detail.filter(r => r.site === siteName || r.site.replace(/\s/g,'') === siteName.replace(/\s/g,''));
+  const html = `
+    <h2>${siteName} 상세 현황</h2>
+    <p style="color:#888;margin-bottom:16px">총 ${lines.length}개 회선</p>
+    <div class="table-scroll">
+      <table>
+        <thead><tr><th>통신사</th><th>사용처</th><th>요금제</th><th>개통일</th><th>계약만료</th><th>정산상태</th><th>청구방법</th><th>마지막청구</th><th>비고</th></tr></thead>
+        <tbody>${lines.map(r => `
+          <tr>
+            <td>${getCarrierTag(r.carrier)}</td>
+            <td>${r.usage}</td>
+            <td>${r.plan}</td>
+            <td>${r.openDate}</td>
+            <td>${r.contractEnd}</td>
+            <td>${getStatusBadge(r.settlementStatus)}</td>
+            <td>${r.billingMethod}</td>
+            <td>${r.lastBillingDate}</td>
+            <td style="max-width:300px;white-space:normal;font-size:12px">${(r.note||'').replace(/\r?\n/g,'<br>')}</td>
+          </tr>`).join('')}
+        </tbody>
+      </table>
+    </div>`;
+  document.getElementById('modalContent').innerHTML = html;
+  document.getElementById('modalOverlay').classList.add('show');
+}
+
+function closeModal() {
+  document.getElementById('modalOverlay').classList.remove('show');
+}
+
+function renderTable() {
+  const carrier = document.getElementById('carrierFilter').value;
+  const status = document.getElementById('statusFilter').value;
+  const search = document.getElementById('searchInput').value.toLowerCase();
+
+  let filtered = DATA.detail;
+  if (carrier) filtered = filtered.filter(r => r.carrier === carrier);
+  if (status) filtered = filtered.filter(r => String(r.settlementStatus).includes(status));
+  if (search) filtered = filtered.filter(r =>
+    (r.site + r.constructor + r.usage + r.note).toLowerCase().includes(search)
+  );
+
+  document.getElementById('tableCount').textContent = `${filtered.length}건 / 전체 ${DATA.detail.length}건`;
+
+  document.getElementById('detailBody').innerHTML = filtered.map((r, i) => `
+    <tr>
+      <td>${i + 1}</td>
+      <td>${getCarrierTag(r.carrier)}</td>
+      <td><strong>${r.site}</strong></td>
+      <td>${r.usage}</td>
+      <td>${r.plan}</td>
+      <td>${r.contract_months ? r.contract_months + '개월' : '-'}</td>
+      <td>${r.openDate}</td>
+      <td>${r.contractEnd}</td>
+      <td>${getStatusBadge(r.settlementStatus)}</td>
+      <td>${r.billingMethod}</td>
+      <td>${r.lastBillingDate}</td>
+      <td>${r.nextBillingMonth}</td>
+      <td>${r.constructor}</td>
+      <td style="max-width:250px;white-space:normal;font-size:12px">${(r.note||'').substring(0,80)}${(r.note||'').length>80?'...':''}</td>
+    </tr>`).join('');
+}
+
+function exportCSV() {
+  const headers = ['통신사','현장명','사용처','상품/요금제','약정','개통일','계약만료','정산상태','청구방법','마지막청구일','다음청구월','건설사명','비고'];
+  const rows = DATA.detail.map(r => [r.carrier,r.site,r.usage,r.plan,r.contract_months,r.openDate,r.contractEnd,r.settlementStatus,r.billingMethod,r.lastBillingDate,r.nextBillingMonth,r.constructor,r.note].map(v => '"' + String(v||'').replace(/"/g,'""') + '"').join(','));
+  const bom = '﻿';
+  const csv = bom + headers.join(',') + '\n' + rows.join('\n');
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = '통신비_상세내역.csv';
+  a.click();
+}
+
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
+loadData();
+</script>
+</body>
+</html>
