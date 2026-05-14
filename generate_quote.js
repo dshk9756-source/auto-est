@@ -87,10 +87,10 @@ function snapshotRow(ws, rowNum, maxCol = 8, themeColors = null) {
 }
 
 /* ── 행 높이 계산 헬퍼 ────────────────────────────────────────────────
-   맑은고딕 10pt 기준 1줄 높이 (pt).
-   font 10pt × 1.35 ≈ 13.5pt (위아래 여백 포함)
+   Noto Sans KR 10pt 기준 1줄 높이 (pt).
+   Noto Sans KR은 맑은고딕보다 ascender/descender가 커서 여백이 더 필요
 ──────────────────────────────────────────────────────────────────── */
-const LINE_HEIGHT_PT = 15.5; // 맑은고딕 10pt 기준
+const LINE_HEIGHT_PT = 17;
 
 /**
  * 문자열이 주어진 열 너비(character unit)에서 몇 줄을 차지하는지 계산.
@@ -236,21 +236,88 @@ function findMarkers(ws) {
    § 3. 헤더 치환  ─  ITEM_START 행까지만, 행 번호 하드코딩 없음
    ※ {{TOP_GROUP_N}} 마커는 § 3.5 expandTopGroups 에서 처리
 ═══════════════════════════════════════════════════════════════════════ */
+function numberToHanja(n) {
+  const num = Math.round(Math.abs(n));
+  if (num === 0) return '零';
+  const digits = ['', '壹', '貳', '參', '肆', '伍', '陸', '柒', '捌', '玖'];
+  const units  = ['', '拾', '佰', '仟'];
+  const bigs   = ['', '萬', '億', '兆'];
+  const groups = [];
+  let remaining = num;
+  while (remaining > 0) {
+    groups.push(remaining % 10000);
+    remaining = Math.floor(remaining / 10000);
+  }
+  let result = '';
+  for (let i = groups.length - 1; i >= 0; i--) {
+    let g = groups[i];
+    if (g === 0) continue;
+    let part = '';
+    for (let u = 3; u >= 0; u--) {
+      const d = Math.floor(g / Math.pow(10, u)) % 10;
+      if (d === 0) continue;
+      part += digits[d] + units[u];
+    }
+    result += part + bigs[i];
+  }
+  return result;
+}
+
+function calcSupplyTotal(items) {
+  let s = 0;
+  for (const it of (items || [])) {
+    if (it.type === 'smart_group') { s += it.totalPrice || 0; continue; }
+    const qty = it.qty || it.mult || 1;
+    const price = it.effectiveP || 0;
+    if (it.type === 'set' && it.members) {
+      for (const m of it.members) s += (m.effectiveP || 0) * (m.q || 1) * qty;
+    } else {
+      s += price * qty;
+    }
+  }
+  return s;
+}
+
 function fillHeader(ws, data, markers) {
   const stopRow = markers.start > 0 ? markers.start : 99;
 
+  const supply = calcSupplyTotal(data.items);
+  const supplyStr = Math.round(supply).toLocaleString('ko-KR');
+
   const phMap = {
     '{{거래처명 현장명}}': data.client  || '',
+    '{{건설사}}':          data.company  || data.client || '',
+    '{{건설사명}}':        data.company  || data.client || '',
+    '{{현장명}}':          data.siteName || '',
     '{{담당자}}':          data.manager || '',
     '{{연락처}}':          data.contact || '',
     '{{견적일자}}':         data.date    || '',
     '{{견적명}}':           data.site    || '',
+    '{{합계금액}}':         supplyStr,
+    '{{합계금액_한자}}':    numberToHanja(supply),
   };
 
   ws.eachRow((row, rn) => {
     if (rn > stopRow) return;
 
     row.eachCell({ includeEmpty: false }, cell => {
+      // 수식 안에 마커가 있는 경우 → 수식 결과(문자열)로 변환
+      if (cell.value && typeof cell.value === 'object' && cell.value.formula) {
+        const result = String(cell.value.result ?? '');
+        let hasMarker = false;
+        for (const ph of Object.keys(phMap)) {
+          if (result.includes(ph)) { hasMarker = true; break; }
+        }
+        if (hasMarker) {
+          let v = result;
+          for (const [ph, val] of Object.entries(phMap)) {
+            if (v.includes(ph)) v = v.replace(ph, val);
+          }
+          cell.value = v;
+        }
+        return;
+      }
+
       if (typeof cell.value !== 'string') return;
       let v = cell.value;
 
@@ -801,19 +868,42 @@ async function generateSmartQuote(data) {
   const itemRowSnap   = snapshotRow(ws, m.itemRow, 9, themeColors);
 
   /* ── 헤더 플레이스홀더 치환 (전 시트, ITEM_START 이전 행만) */
+  const supply = calcSupplyTotal(data.items);
+  const supplyStr = Math.round(supply).toLocaleString('ko-KR');
+
   const phMap = {
-    '{{현장명}}':          data.client  || '',
     '{{거래처명 현장명}}': data.client  || '',
+    '{{건설사}}':          data.company  || data.client || '',
+    '{{건설사명}}':        data.company  || data.client || '',
+    '{{현장명}}':          data.siteName || data.client || '',
     '{{담당자}}':          data.manager || '',
     '{{연락처}}':          data.contact || '',
     '{{견적일자}}':         data.date    || '',
     '{{견적명}}':           data.site    || '',
+    '{{합계금액}}':         supplyStr,
+    '{{합계금액_한자}}':    numberToHanja(supply),
   };
   for (const sheet of wb.worksheets) {
     const stop = sheet === ws ? m.start - 1 : 9999;
     sheet.eachRow((row, rn) => {
       if (rn > stop) return;
       row.eachCell({ includeEmpty: false }, cell => {
+        // 수식 안에 마커가 있는 경우 → 수식 결과(문자열)로 변환
+        if (cell.value && typeof cell.value === 'object' && cell.value.formula) {
+          const result = String(cell.value.result ?? '');
+          let hasMarker = false;
+          for (const ph of Object.keys(phMap)) {
+            if (result.includes(ph)) { hasMarker = true; break; }
+          }
+          if (hasMarker) {
+            let v = result;
+            for (const [ph, val] of Object.entries(phMap)) {
+              if (v.includes(ph)) v = v.replace(ph, val);
+            }
+            cell.value = v;
+          }
+          return;
+        }
         if (typeof cell.value !== 'string') return;
         let v = cell.value;
         for (const [ph, val] of Object.entries(phMap)) v = v.replace(ph, val);
@@ -1225,4 +1315,292 @@ async function generateSmartQuote(data) {
   return copyDrawings(templateBuf, generated);
 }
 
-module.exports = { generateQuote, generateSmartQuote };
+/* ═══════════════════════════════════════════════════════════════════════
+   § 8. 미리보기 JSON 추출
+   ─ 생성된 엑셀 버퍼를 ExcelJS로 다시 로드하여
+     셀 값·스타일·병합·열 너비·행 높이를 JSON으로 추출한다.
+═══════════════════════════════════════════════════════════════════════ */
+function evalSimpleFormula(formula, ws) {
+  const getCellVal = (ref) => {
+    const m = ref.match(/^([A-Z]+)(\d+)$/);
+    if (!m) return 0;
+    let col = 0;
+    for (const ch of m[1]) col = col * 26 + ch.charCodeAt(0) - 64;
+    const row = parseInt(m[2], 10);
+    const v = ws.getRow(row).getCell(col).value;
+    if (v && typeof v === 'object' && v.formula) {
+      return v.result != null ? Number(v.result) || 0 : evalSimpleFormula(v.formula, ws);
+    }
+    return typeof v === 'number' ? v : (Number(v) || 0);
+  };
+
+  const sumMatch = formula.match(/^SUM\((.+)\)$/i);
+  if (sumMatch) {
+    const args = sumMatch[1];
+    let total = 0;
+    for (const part of args.split(',')) {
+      const range = part.trim().match(/^([A-Z]+)(\d+):([A-Z]+)(\d+)$/);
+      if (range) {
+        let col = 0;
+        for (const ch of range[1]) col = col * 26 + ch.charCodeAt(0) - 64;
+        const r1 = parseInt(range[2], 10), r2 = parseInt(range[4], 10);
+        for (let r = r1; r <= r2; r++) total += getCellVal(range[1] + r);
+      } else {
+        total += getCellVal(part.trim());
+      }
+    }
+    return total;
+  }
+
+  const mulMatch = formula.match(/^([A-Z]+\d+)\*([A-Z]+\d+)$/);
+  if (mulMatch) return getCellVal(mulMatch[1]) * getCellVal(mulMatch[2]);
+
+  return '';
+}
+
+async function extractPreviewData(xlsxBuffer) {
+  const wb = new ExcelJS.Workbook();
+  await wb.xlsx.load(xlsxBuffer);
+
+  const sheets = [];
+  for (const ws of wb.worksheets) {
+    let lastDataCol = 1;
+    ws.eachRow((row) => {
+      row.eachCell({ includeEmpty: false }, cell => {
+        const cn = cell.col || 1;
+        if (cn > lastDataCol) lastDataCol = cn;
+      });
+    });
+    const maxCol = Math.min(lastDataCol, 20);
+
+    const colWidths = [];
+    for (let c = 1; c <= maxCol; c++) {
+      const col = ws.getColumn(c);
+      if (col.hidden) { colWidths.push(0); continue; }
+      colWidths.push(col.width || 8);
+    }
+
+    const merges = [];
+    if (ws._merges) {
+      Object.values(ws._merges).forEach(m => {
+        const { top, left, bottom, right } = m.model;
+        merges.push({ r1: top, c1: left, r2: bottom, c2: right });
+      });
+    }
+
+    const rows = [];
+    ws.eachRow({ includeEmpty: true }, (row, rn) => {
+      const cells = [];
+      for (let c = 1; c <= maxCol; c++) {
+        const cell = row.getCell(c);
+        let val = cell.value;
+        if (val && typeof val === 'object') {
+          if (val.formula) {
+            if (val.result != null && val.result !== '') {
+              val = val.result;
+            } else {
+              val = evalSimpleFormula(val.formula, ws, rn);
+            }
+          }
+          else if (val.richText) val = val.richText.map(r => r.text).join('');
+          else if (val instanceof Date) val = val.toISOString().slice(0, 10);
+          else val = String(val);
+        }
+        const s = {};
+        if (cell.font) {
+          if (cell.font.bold) s.b = true;
+          if (cell.font.size) s.sz = cell.font.size;
+          if (cell.font.color && cell.font.color.argb) s.fc = '#' + cell.font.color.argb.slice(2);
+          if (cell.font.name) s.fn = cell.font.name;
+        }
+        if (cell.fill && cell.fill.fgColor) {
+          const fg = cell.fill.fgColor;
+          if (fg.argb && fg.argb !== 'FF000000' && fg.argb !== '00000000') {
+            s.bg = '#' + fg.argb.slice(2);
+          }
+        }
+        if (cell.alignment) {
+          if (cell.alignment.horizontal) s.ha = cell.alignment.horizontal;
+          if (cell.alignment.vertical) s.va = cell.alignment.vertical;
+          if (cell.alignment.wrapText) s.wrap = true;
+        }
+        if (cell.border) {
+          const bd = {};
+          ['top', 'bottom', 'left', 'right'].forEach(side => {
+            if (cell.border[side] && cell.border[side].style) {
+              bd[side] = cell.border[side].style;
+              if (cell.border[side].color && cell.border[side].color.argb) {
+                bd[side + 'C'] = '#' + cell.border[side].color.argb.slice(2);
+              }
+            }
+          });
+          if (Object.keys(bd).length > 0) s.bd = bd;
+        }
+        if (cell.numFmt && cell.numFmt !== 'General') s.nf = cell.numFmt;
+        cells.push({ v: val, s: Object.keys(s).length > 0 ? s : undefined });
+      }
+      rows.push({ rn, h: row.height || 15, cells });
+    });
+
+    sheets.push({ name: ws.name, colWidths, merges, rows });
+  }
+  return sheets;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   § 9. 구매요청서 생성
+   ─ template/구매요청서.xlsx 기반
+   ─ 마커: {{ITEM_START}} {{ITEM_ROW}} {{GRAND_TOTAL}}
+   ─ 헤더: {{신청일자}} {{신청부서}} {{신청인}}
+   ─ 컬럼: A=NO B=상호 C=품명 D=수량 E=단가 F=공급가액 G=세액 H=지급총액
+           I=증빙구분 J=계좌번호 K=정산납기일 L=구매사유/현장명 M=마커
+═══════════════════════════════════════════════════════════════════════ */
+const PR_TEMPLATE = path.join(__dirname, 'template', '구매요청서.xlsx');
+const PR_MAX_COL  = 13;
+
+async function generatePurchaseRequest(data) {
+  const templateBuf = fs.readFileSync(PR_TEMPLATE);
+  const wb = new ExcelJS.Workbook();
+  await wb.xlsx.load(templateBuf);
+
+  const ws = wb.worksheets[0];
+  if (!ws) throw new Error('구매요청서 템플릿에서 시트를 찾을 수 없습니다.');
+
+  /* ── 마커 탐색 */
+  const m = { start: -1, itemRow: -1, grandTotal: -1 };
+  ws.eachRow((row, rn) => {
+    row.eachCell({ includeEmpty: false }, cell => {
+      const v = String(cell.value ?? '');
+      if (v.includes('{{ITEM_START}}'))  m.start      = rn;
+      if (v.includes('{{ITEM_ROW}}'))    m.itemRow     = rn;
+      if (v.includes('{{GRAND_TOTAL}}')) m.grandTotal  = rn;
+    });
+  });
+  if (m.start < 0 || m.itemRow < 0 || m.grandTotal < 0)
+    throw new Error(`구매요청서 마커를 찾지 못했습니다: ${JSON.stringify(m)}`);
+
+  /* ── 헤더 치환 */
+  const client = [data.company, data.siteName].filter(Boolean).join(' ') || data.client || '';
+  const phMap = {
+    '{{신청일자}}': data.requestDate || data.date || '',
+    '{{신청부서}}': data.department || '스마트건설팀',
+    '{{신청인}}':   data.manager || '',
+  };
+  ws.eachRow((row, rn) => {
+    if (rn >= m.start) return;
+    row.eachCell({ includeEmpty: false }, cell => {
+      if (typeof cell.value !== 'string') return;
+      let v = cell.value;
+      for (const [ph, val] of Object.entries(phMap)) {
+        if (v.includes(ph)) v = v.replace(ph, val);
+      }
+      cell.value = v;
+    });
+  });
+
+  /* ── footer 병합 사전 캡처 */
+  const footerMergesOrig = [];
+  if (ws._merges) {
+    Object.values(ws._merges).forEach(mg => {
+      const { top, left, bottom, right } = mg.model;
+      if (top > m.grandTotal) footerMergesOrig.push({ top, left, bottom, right });
+    });
+  }
+
+  /* ── 행 스냅샷 (삭제 전) */
+  const itemRowSnap = snapshotRow(ws, m.itemRow, PR_MAX_COL);
+
+  /* ── 마커 구역 삭제 (ITEM_ROW ~ GRAND_TOTAL 직전까지) */
+  const insertAt    = m.itemRow;
+  const deleteCount = m.grandTotal - m.itemRow; // ITEM_ROW부터 GRAND_TOTAL 직전까지
+
+  // ITEM_START 행(헤더)의 M열 마커 제거
+  const startRow = ws.getRow(m.start);
+  startRow.eachCell({ includeEmpty: false }, cell => {
+    if (String(cell.value ?? '').includes('{{ITEM_START}}')) cell.value = null;
+  });
+
+  // 삭제 범위 내 병합 제거
+  if (ws._merges) {
+    const lastDel = insertAt + deleteCount - 1;
+    Object.keys(ws._merges)
+      .filter(k => { const { top, bottom } = ws._merges[k].model; return top >= insertAt && bottom <= lastDel; })
+      .forEach(k => delete ws._merges[k]);
+  }
+  ws.spliceRows(insertAt, deleteCount);
+
+  /* ── 데이터 행 삽입 */
+  const items = data.items || [];
+  if (items.length > 0) {
+    ws.spliceRows(insertAt, 0, ...items.map(() => []));
+  }
+
+  /* ── 각 행에 스타일·데이터 적용 */
+  const itemRows = [];
+  items.forEach((it, i) => {
+    const rn = insertAt + i;
+    const qty   = it.qty || 1;
+    const price = it.price || 0;
+    const supply = price * qty;
+    const tax    = Math.round(supply * 0.1);
+    const total  = supply + tax;
+
+    stampRow(ws, rn, itemRowSnap, {
+      1:  i + 1,                               // NO
+      2:  it.supplier || '',                    // 상호
+      3:  it.name || '',                        // 품명
+      4:  qty,                                  // 수량
+      5:  price > 0 ? price : null,             // 단가
+      6:  supply > 0 ? supply : null,           // 공급가액
+      7:  tax > 0 ? tax : null,                 // 세액
+      8:  total > 0 ? total : null,             // 지급총액
+      9:  it.evidence || '',                    // 증빙구분
+      10: it.account || '',                     // 계좌번호
+      11: data.deliveryDate || '',              // 정산 납기일
+      12: it.purchaseReason || client || '',     // 구매사유/현장명
+      13: null,                                 // 마커열 비움
+    }, PR_MAX_COL);
+
+    // 숫자 서식
+    [5, 6, 7, 8].forEach(c => {
+      ws.getRow(rn).getCell(c).numFmt = NUM_FMT;
+    });
+    ws.getRow(rn).getCell(4).numFmt = '#,##0';
+    itemRows.push(rn);
+  });
+
+  /* ── footer 병합 복원 */
+  const netShift = items.length - deleteCount;
+  if (ws._merges) {
+    Object.keys(ws._merges)
+      .filter(k => ws._merges[k].model.top >= insertAt + items.length)
+      .forEach(k => delete ws._merges[k]);
+  }
+  footerMergesOrig.forEach(({ top, left, bottom, right }) => {
+    ws.mergeCells(top + netShift, left, bottom + netShift, right);
+  });
+
+  /* ── 합계 행 수식 */
+  const gtRn = m.grandTotal + netShift;
+  if (itemRows.length > 0) {
+    const gtCell = ws.getRow(gtRn).getCell(8); // H열 = 지급총액 합계
+    gtCell.value = { formula: `SUM(H${itemRows[0]}:H${itemRows[itemRows.length - 1]})` };
+    gtCell.numFmt = NUM_FMT;
+  }
+  // 합계 행 A~G 병합 복원
+  try { ws.unMergeCells(gtRn, 1, gtRn, 7); } catch (_) {}
+  ws.mergeCells(gtRn, 1, gtRn, 7);
+  // M열 마커 제거
+  ws.getRow(gtRn).getCell(13).value = null;
+
+  /* ── M열 숨김 */
+  ws.getColumn(13).hidden = true;
+
+  /* ── printArea 제거 */
+  if (ws.pageSetup) delete ws.pageSetup.printArea;
+
+  const generated = await wb.xlsx.writeBuffer();
+  return copyDrawings(templateBuf, generated);
+}
+
+module.exports = { generateQuote, generateSmartQuote, extractPreviewData, generatePurchaseRequest };

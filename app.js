@@ -15,6 +15,7 @@ function formatPhone(el){
 }
 let NOTES_DEFAULT = [];
 let SMART_GROUPS = [];
+let PURCHASE_MAP = {};
 let catalogMode = 'normal';
 
 function normRowKeys(row) {
@@ -240,7 +241,23 @@ function catalogFromWorkbook(wb) {
       });
   }
 
-  return { SETS: sets, ITEMS: items, NOTES_DEFAULT: notesDefault, SMART_GROUPS: smartGroups };
+  // 구매요청 시트 파싱
+  const prSh = S['구매요청'] || S.PurchaseRequest;
+  let purchaseMap = {};
+  if (prSh) {
+    const prRows = X.utils.sheet_to_json(prSh, { defval: '' }).map(normRowKeys);
+    for (const r of prRows) {
+      const pid = cellStr(r.id || r['품목id']).trim();
+      if (!pid) continue;
+      purchaseMap[pid] = {
+        name: cellStr(r['구매품목명'] || r.name).trim(),
+        supplier: cellStr(r['기본구매처'] || r.supplier || r['구매처']).trim(),
+        note: cellStr(r.note || r['비고']).trim(),
+      };
+    }
+  }
+
+  return { SETS: sets, ITEMS: items, NOTES_DEFAULT: notesDefault, SMART_GROUPS: smartGroups, PURCHASE_MAP: purchaseMap };
 }
 
 function showCatalogErr(msg) {
@@ -293,6 +310,7 @@ async function loadCatalog() {
   ITEMS = data.ITEMS || [];
   NOTES_DEFAULT = data.NOTES_DEFAULT || [];
   SMART_GROUPS = data.SMART_GROUPS || [];
+  PURCHASE_MAP = data.PURCHASE_MAP || {};
   if (!SETS.length && !ITEMS.length) {
     showCatalogErr("세트/단품 데이터가 비어 있습니다.");
     SETS = [];
@@ -326,7 +344,7 @@ function showView(id,btn){
 }
 
 function syncSteps(){
-  const hasInfo=(document.getElementById('f-client').value||document.getElementById('f-site').value).trim();
+  const hasInfo=(document.getElementById('f-company').value||document.getElementById('f-sitename').value||document.getElementById('f-site').value).trim();
   const hasCart=Object.keys(cart).length>0;
   setSt('step1',hasInfo?'done':'active');
   setSt('step2',hasCart?'done':hasInfo?'active':'');
@@ -457,6 +475,8 @@ function renderCart(){
     document.getElementById('rp-meta').textContent='항목을 선택하세요';
     saveBtn.disabled=true;
     const excelBtnE=document.getElementById('excel-btn');if(excelBtnE)excelBtnE.disabled=true;
+    const pvBtnE=document.getElementById('preview-btn');if(pvBtnE)pvBtnE.disabled=true;
+    const prBtnE=document.getElementById('purchase-btn');if(prBtnE)prBtnE.disabled=true;
     return;
   }
   let html='';
@@ -518,6 +538,10 @@ function renderCart(){
   saveBtn.disabled=false;
   const excelBtn=document.getElementById('excel-btn');
   if(excelBtn)excelBtn.disabled=false;
+  const pvBtn=document.getElementById('preview-btn');
+  if(pvBtn)pvBtn.disabled=false;
+  const prBtn=document.getElementById('purchase-btn');
+  if(prBtn)prBtn.disabled=false;
 }
 
 function recalcTotals(){
@@ -590,7 +614,7 @@ function onCartDrop(e){
         const rect=memberRow.getBoundingClientRect();
         insertIdx=e.clientY<rect.top+rect.height/2?rowIdx:rowIdx+1;
       }
-      set.members.splice(insertIdx,0,{itemId:src.id,n:src.name,q:1,p:src.p,spec:src.spec||'',u:src.u||'EA'});
+      set.members.splice(insertIdx,0,{itemId:src.id,n:src.name,q:1,p:src.p,spec:src.spec||'',u:src.u||'EA',cat:src.cat||''});
     }
     renderCart();syncSteps();
     return;
@@ -623,7 +647,9 @@ function onMemberRowDragLeave(e){
 
 
 function saveQuote(){
-  const client=document.getElementById('f-client').value||'(미입력)';
+  const company=document.getElementById('f-company').value||'';
+  const siteName=document.getElementById('f-sitename').value||'';
+  const client=[company,siteName].filter(Boolean).join(' ')||'(미입력)';
   const site=document.getElementById('f-site').value||'스마트 안전관리 솔루션';
   const manager=document.getElementById('f-manager').value||'';
   const contact=document.getElementById('f-contact').value||'';
@@ -641,7 +667,7 @@ function saveQuote(){
     }
   });
   const h=loadHistory();
-  h.unshift({id:'q'+Date.now(),client,site,manager,contact,date,valid,notes,
+  h.unshift({id:'q'+Date.now(),client,company,siteName,site,manager,contact,date,valid,notes,
     supply,vat:supply*.1,total:supply*1.1,status:'review',items:snapshot,
     template:selectedTemplate,
     createdAt:new Date().toISOString()});
@@ -682,7 +708,7 @@ function renderHistory(){
         <span class="status-badge ${sc.cls}" onclick="toggleStDrop('${q.id}')">${sc.label}</span>
         <div class="st-drop">${Object.entries(STATUS_CFG).map(([k,v])=>`<div class="st-opt" onclick="changeStatus('${q.id}','${k}')"><div class="st-dot" style="background:${v.dot}"></div><span style="font-size:11px;color:var(--ice)">${v.label}</span></div>`).join('')}</div>
       </div></td>
-      <td><div class="hist-actions"><button class="a-btn" onclick="toggleDetail('${q.id}')">상세</button><button class="a-btn" onclick="downloadFromHist('${q.id}')">다운로드</button><button class="a-btn del" onclick="deleteQuote('${q.id}')">삭제</button></div></td>
+      <td><div class="hist-actions"><button class="a-btn" onclick="toggleDetail('${q.id}')">상세</button><button class="a-btn" onclick="downloadFromHist('${q.id}')">다운로드</button><button class="a-btn pr" onclick="openPurchaseFromHist('${q.id}')">구매요청</button><button class="a-btn del" onclick="deleteQuote('${q.id}')">삭제</button></div></td>
     </tr>
     <tr><td colspan="5" style="padding:0"><div class="hist-detail" id="hd-${q.id}">
       <div class="hd-title">견적 구성 품목</div>
@@ -723,15 +749,23 @@ function getNotes(){
 
 /* ── 엑셀 페이로드 빌드 ─────────────────────────────────────────── */
 function _buildPayload(src){
-  if(src) return {
-    client:src.client||'',site:src.site||'',
-    manager:src.manager||'',contact:src.contact||'',
-    date:src.date||'',valid:src.valid||'30일',
-    template:src.template||'',
-    notes:src.notes||(src.note?[src.note]:[]),items:src.items||[]
-  };
+  if(src) {
+    const company = src.company||'';
+    const siteName = src.siteName||'';
+    const client = src.client || [company,siteName].filter(Boolean).join(' ') || '';
+    return {
+      client,company,siteName,site:src.site||'',
+      manager:src.manager||'',contact:src.contact||'',
+      date:src.date||'',valid:src.valid||'30일',
+      template:src.template||'',
+      notes:src.notes||(src.note?[src.note]:[]),items:src.items||[]
+    };
+  }
+  const company = document.getElementById('f-company').value||'';
+  const siteName = document.getElementById('f-sitename').value||'';
+  const client = [company,siteName].filter(Boolean).join(' ')||'(미입력)';
   return {
-    client:  document.getElementById('f-client').value||'(미입력)',
+    client,company,siteName,
     site:    document.getElementById('f-site').value||'스마트 안전관리 솔루션',
     manager: document.getElementById('f-manager').value||'',
     contact: document.getElementById('f-contact').value||'',
@@ -781,7 +815,8 @@ async function downloadFromHist(id){
     const url=URL.createObjectURL(blob);
     const a=document.createElement('a');
     const ds=p.date.replace(/-/g,'').slice(2);
-    a.href=url;a.download=`${p.client}_${p.site}_${ds}.xlsx`;
+    const cmpSuffix=(p.template&&p.template.includes('비교'))?'_비교견적':'';
+    a.href=url;a.download=`${p.client}_${p.site}_${ds}${cmpSuffix}.xlsx`;
     document.body.appendChild(a);a.click();document.body.removeChild(a);URL.revokeObjectURL(url);
   }catch(e){alert('오류: '+e.message);}
 }
@@ -932,11 +967,313 @@ async function generateExcel(){
     const url=URL.createObjectURL(blob);
     const a=document.createElement('a');
     const ds=p.date.replace(/-/g,'').slice(2);
-    a.href=url;a.download=`${p.client}_${p.site}_${ds}.xlsx`;
+    const cmpSuffix=(p.template&&p.template.includes('비교'))?'_비교견적':'';
+    a.href=url;a.download=`${p.client}_${p.site}_${ds}${cmpSuffix}.xlsx`;
     document.body.appendChild(a);a.click();document.body.removeChild(a);URL.revokeObjectURL(url);
     btn.textContent='✓ 완료';btn.style.borderColor='var(--sigbdr)';btn.style.color='var(--sig)';
     setTimeout(()=>{btn.textContent=orig;btn.style.borderColor='';btn.style.color='';btn.disabled=false;},2000);
   }catch(e){
     alert('오류: '+e.message);btn.textContent=orig;btn.disabled=false;
   }
+}
+
+/* ────────────────────────────────────────────────
+   견적서 미리보기
+──────────────────────────────────────────────── */
+let previewSheets = null;
+
+async function previewExcel(){
+  const btn=document.getElementById('preview-btn');
+  const orig=btn.textContent;
+  btn.textContent='생성 중…';btn.disabled=true;
+  const p=_buildPayload();
+  try{
+    const resp=await fetch('/api/preview',{
+      method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(p)
+    });
+    if(!resp.ok){const e=await resp.json().catch(()=>({error:'서버 오류'}));throw new Error(e.error);}
+    previewSheets=await resp.json();
+    openPreview(0);
+  }catch(e){
+    alert('미리보기 오류: '+e.message);
+  }finally{
+    btn.textContent=orig;btn.disabled=false;
+  }
+}
+
+function openPreview(sheetIdx){
+  const overlay=document.getElementById('pv-overlay');
+  const tabs=document.getElementById('pv-tabs');
+  const body=document.getElementById('pv-body');
+  overlay.classList.add('open');
+  const pvLoading=document.getElementById('pv-loading');
+  if(pvLoading) pvLoading.style.display='none';
+
+  tabs.innerHTML=previewSheets.map((sh,i)=>
+    `<button class="pv-tab${i===sheetIdx?' on':''}" onclick="switchSheet(${i})">${sh.name}</button>`
+  ).join('');
+
+  renderSheet(previewSheets[sheetIdx], body);
+}
+
+function switchSheet(idx){
+  document.querySelectorAll('.pv-tab').forEach((t,i)=>t.classList.toggle('on',i===idx));
+  renderSheet(previewSheets[idx], document.getElementById('pv-body'));
+}
+
+function closePreview(){
+  document.getElementById('pv-overlay').classList.remove('open');
+}
+
+function renderSheet(sheet, container){
+  const mergeMap={};
+  (sheet.merges||[]).forEach(m=>{
+    for(let r=m.r1;r<=m.r2;r++)
+      for(let c=m.c1;c<=m.c2;c++)
+        if(r===m.r1&&c===m.c1) mergeMap[r+','+c]={rs:m.r2-m.r1+1,cs:m.c2-m.c1+1};
+        else mergeMap[r+','+c]={skip:true};
+  });
+
+  const colWidths=sheet.colWidths||[];
+  const visibleCols=colWidths.map((w,i)=>({idx:i,w})).filter(c=>c.w>0);
+  const MIN_PCT=8;
+  const MAX_PCT=30;
+  const rawTotal=visibleCols.reduce((a,c)=>a+c.w,0);
+  let pcts=visibleCols.map(c=>c.w/rawTotal*100);
+  pcts=pcts.map(p=>Math.max(p,MIN_PCT));
+  pcts=pcts.map(p=>Math.min(p,MAX_PCT));
+  const pctTotal=pcts.reduce((a,p)=>a+p,0);
+  pcts=pcts.map(p=>p/pctTotal*100);
+  let html='<div class="pv-sheet-wrap"><table class="pv-sheet"><colgroup>';
+  visibleCols.forEach((c,i)=>{html+=`<col style="width:${pcts[i].toFixed(2)}%">`;});
+  html+='</colgroup><tbody>';
+
+  (sheet.rows||[]).forEach(row=>{
+    const h=row.h||15;
+    html+=`<tr style="height:${h}px">`;
+    visibleCols.forEach(vc=>{
+      const ci=vc.idx;
+      const cell=(row.cells||[])[ci]||{v:null};
+      const col=ci+1;
+      const key=row.rn+','+col;
+      const mg=mergeMap[key];
+      if(mg&&mg.skip) return;
+
+      let attrs='';
+      if(mg){if(mg.rs>1)attrs+=` rowspan="${mg.rs}"`;if(mg.cs>1)attrs+=` colspan="${mg.cs}"`;}
+
+      const s=cell.s||{};
+      let css='';
+      if(s.b) css+='font-weight:bold;';
+      if(s.sz) css+=`font-size:${Math.max(s.sz*0.85,8)}px;`;
+      if(s.fc) css+=`color:${s.fc};`;
+      if(s.fn) css+=`font-family:'${s.fn}','Noto Sans KR',sans-serif;`;
+      if(s.bg) css+=`background:${s.bg};`;
+      if(s.ha) css+=`text-align:${s.ha};`;
+      if(s.va==='top') css+='vertical-align:top;';
+      else if(s.va==='bottom') css+='vertical-align:bottom;';
+      if(s.wrap) css+='white-space:pre-wrap;word-break:break-all;';
+      else css+='white-space:nowrap;';
+
+      if(s.bd){
+        const bmap={thin:'1px solid',medium:'2px solid',thick:'3px solid',dotted:'1px dotted',dashed:'1px dashed'};
+        ['top','bottom','left','right'].forEach(side=>{
+          if(s.bd[side]){
+            const bc=s.bd[side+'C']||'#000';
+            css+=`border-${side}:${bmap[s.bd[side]]||'1px solid'} ${bc};`;
+          }
+        });
+      }
+
+      let val=cell.v;
+      if(val==null) val='';
+      if(typeof val==='number'){
+        if(s.nf&&s.nf.includes('#,##0')) val=val.toLocaleString('ko-KR');
+      }
+      const isEmpty=val===''||val==null;
+      const cls=isEmpty?'class="empty-cell"':'';
+
+      html+=`<td${attrs} ${cls} style="${css}">${escHtml(String(val))}</td>`;
+    });
+    html+='</tr>';
+  });
+
+  html+='</tbody></table></div>';
+  container.innerHTML=html;
+}
+
+function escHtml(s){
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br>');
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   구매요청서 기능
+════════════════════════════════════════════════════════════════════ */
+let purchaseItems = [];
+
+function buildPurchaseItems(source) {
+  const payload = _buildPayload(source);
+  const items = payload.items || [];
+  const result = [];
+
+  for (const it of items) {
+    if (it.type === 'smart_group') continue;
+    const pid = it.itemId || '';
+    if (!pid || !PURCHASE_MAP[pid]) continue;
+    const pm = PURCHASE_MAP[pid];
+    const existing = result.find(r => r.itemId === pid);
+    if (existing) {
+      existing.qty += (it.qty || 1);
+    } else {
+      result.push({
+        itemId: pid,
+        name: pm.name || it.name,
+        spec: it.spec || '',
+        unit: it.unit || 'EA',
+        qty: it.qty || 1,
+        price: 0,
+        supplier: pm.supplier || '',
+        note: pm.note || '',
+      });
+    }
+  }
+  return result;
+}
+
+function openPurchaseModal(source) {
+  purchaseItems = buildPurchaseItems(source);
+  const overlay = document.getElementById('pr-overlay');
+  const body = document.getElementById('pr-body');
+
+  if (!purchaseItems.length) {
+    body.innerHTML = '<div class="pr-empty">구매 대상 품목이 없습니다.</div>';
+    document.getElementById('pr-download-btn').disabled = true;
+    overlay.classList.add('open');
+    return;
+  }
+
+  document.getElementById('pr-download-btn').disabled = false;
+  renderPurchaseTable();
+  overlay.classList.add('open');
+}
+
+function renderPurchaseTable() {
+  const body = document.getElementById('pr-body');
+  let html = '<table class="pr-table"><thead><tr>';
+  html += '<th style="width:30px">No</th>';
+  html += '<th>품목명</th>';
+  html += '<th style="width:60px">단위</th>';
+  html += '<th style="width:70px">수량</th>';
+  html += '<th style="width:120px">단가</th>';
+  html += '<th style="width:180px">구매처</th>';
+  html += '<th style="width:40px"></th>';
+  html += '</tr></thead><tbody>';
+
+  purchaseItems.forEach((it, i) => {
+    const nameCell = it.manual
+      ? `<td><input class="pr-name-in" value="${escHtml(it.name)}" placeholder="품목명 입력" onchange="onPrNameChange(${i},this.value)"></td>`
+      : `<td class="pr-name">${escHtml(it.name)}</td>`;
+    const unitCell = it.manual
+      ? `<td><input class="pr-unit-in" value="${escHtml(it.unit)}" placeholder="EA" onchange="onPrUnitChange(${i},this.value)"></td>`
+      : `<td class="pr-unit">${escHtml(it.unit)}</td>`;
+    html += `<tr>
+      <td class="pr-no">${i + 1}</td>
+      ${nameCell}
+      ${unitCell}
+      <td><input class="pr-qty-in" type="text" inputmode="numeric" value="${it.qty}" oninput="onPrQtyInput(${i},this)"></td>
+      <td><input class="pr-price-in" type="text" inputmode="numeric" value="${it.price ? it.price.toLocaleString() : ''}" placeholder="단가" oninput="onPrPriceInput(${i},this)"></td>
+      <td><input class="pr-supplier-in" value="${escHtml(it.supplier)}" placeholder="구매처 입력" onchange="onPrSupplierChange(${i},this.value)"></td>
+      <td><button class="pr-rm" onclick="removePrItem(${i})" title="제외">&times;</button></td>
+    </tr>`;
+  });
+
+  html += '</tbody></table>';
+  html += '<button class="pr-add-btn" onclick="addPrItem()">+ 품목 추가</button>';
+  body.innerHTML = html;
+}
+
+function onPrQtyInput(idx, el) {
+  const raw = el.value.replace(/[^0-9]/g, '');
+  const num = Math.max(1, parseInt(raw) || 1);
+  purchaseItems[idx].qty = num;
+  el.value = num;
+}
+function onPrPriceInput(idx, el) {
+  const raw = el.value.replace(/[^0-9]/g, '');
+  const num = parseInt(raw) || 0;
+  purchaseItems[idx].price = num;
+  const pos = el.selectionStart;
+  const oldLen = el.value.length;
+  el.value = num ? num.toLocaleString() : '';
+  const newLen = el.value.length;
+  const newPos = Math.max(0, pos + (newLen - oldLen));
+  el.setSelectionRange(newPos, newPos);
+}
+function onPrNameChange(idx, val) { purchaseItems[idx].name = val; }
+function onPrUnitChange(idx, val) { purchaseItems[idx].unit = val; }
+function onPrSupplierChange(idx, val) { purchaseItems[idx].supplier = val; }
+function addPrItem() {
+  purchaseItems.push({ itemId: '', name: '', spec: '', unit: 'EA', qty: 1, price: 0, supplier: '', note: '', manual: true });
+  document.getElementById('pr-download-btn').disabled = false;
+  renderPurchaseTable();
+}
+function removePrItem(idx) {
+  purchaseItems.splice(idx, 1);
+  if (!purchaseItems.length) {
+    document.getElementById('pr-body').innerHTML = '<div class="pr-empty">구매 대상 품목이 없습니다.</div>';
+    document.getElementById('pr-download-btn').disabled = true;
+    return;
+  }
+  renderPurchaseTable();
+}
+
+function closePurchaseModal() {
+  document.getElementById('pr-overlay').classList.remove('open');
+}
+
+async function downloadPurchaseRequest() {
+  if (!purchaseItems.length) return;
+  const btn = document.getElementById('pr-download-btn');
+  const orig = btn.textContent;
+  btn.textContent = '생성 중…'; btn.disabled = true;
+
+  const company = document.getElementById('f-company').value || '';
+  const siteName = document.getElementById('f-sitename').value || '';
+  const client = [company, siteName].filter(Boolean).join(' ') || '(미입력)';
+  const date = document.getElementById('f-date').value || new Date().toISOString().slice(0, 10);
+  const manager = document.getElementById('pr-applicant').value || document.getElementById('f-manager').value || '';
+
+  const payload = {
+    client, company, siteName, date, manager,
+    items: purchaseItems,
+  };
+
+  try {
+    const resp = await fetch('/api/generate-purchase-request', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (!resp.ok) { const e = await resp.json().catch(() => ({ error: '서버 오류' })); throw new Error(e.error); }
+    const blob = await resp.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    const ds = date.replace(/-/g, '').slice(2);
+    const itemNames = [...new Set(purchaseItems.map(it => it.name))].join(', ');
+    const suppliers = [...new Set(purchaseItems.map(it => it.supplier).filter(Boolean))].join(', ');
+    const fname = `${ds} ${siteName || client} ${itemNames}${suppliers ? '(' + suppliers + ')' : ''}`;
+    a.href = url; a.download = `${fname}.xlsx`;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
+    btn.textContent = '✓ 완료'; btn.style.borderColor = 'var(--sigbdr)'; btn.style.color = 'var(--sig)';
+    setTimeout(() => { btn.textContent = orig; btn.style.borderColor = ''; btn.style.color = ''; btn.disabled = false; }, 2000);
+  } catch (e) {
+    alert('오류: ' + e.message);
+    btn.textContent = orig; btn.disabled = false;
+  }
+}
+
+function openPurchaseFromHist(id) {
+  const q = loadHistory().find(x => x.id === id);
+  if (!q) return;
+  openPurchaseModal(q);
 }

@@ -3,7 +3,7 @@
 const http = require('http');
 const fs   = require('fs');
 const path = require('path');
-const { generateQuote, generateSmartQuote } = require('./generate_quote');
+const { generateQuote, generateSmartQuote, extractPreviewData, generatePurchaseRequest } = require('./generate_quote');
 
 const ROOT = __dirname;
 const PORT = process.env.PORT ? Number(process.env.PORT) : 5173;
@@ -40,8 +40,9 @@ const server = http.createServer((req, res) => {
     /* ── GET /api/templates : template/ 폴더의 xlsx 목록 반환 ── */
     if (req.method === 'GET' && pathname === '/api/templates') {
       const templateDir = path.join(ROOT, 'template');
+      const EXCLUDE = ['구매요청서.xlsx'];
       const files = fs.readdirSync(templateDir)
-        .filter(f => f.endsWith('.xlsx'))
+        .filter(f => f.endsWith('.xlsx') && !f.startsWith('~$') && !EXCLUDE.includes(f))
         .map(f => ({ filename: f, label: f.replace(/\.xlsx$/i, '') }));
       res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Access-Control-Allow-Origin': '*' });
       res.end(JSON.stringify(files));
@@ -58,8 +59,9 @@ const server = http.createServer((req, res) => {
           const data   = JSON.parse(body);
           const isSmartTpl = data.template && data.template.includes('스마트');
           const buffer = await (isSmartTpl ? generateSmartQuote(data) : generateQuote(data));
+          const cmpSuffix = (data.template && data.template.includes('비교')) ? '_비교견적' : '';
           const fname  = encodeURIComponent(
-            `${data.client || 'OPENWORKS'}_${data.date || ''}.xlsx`
+            `${data.client || 'OPENWORKS'}_${data.date || ''}${cmpSuffix}.xlsx`
           );
           res.writeHead(200, {
             'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
@@ -70,6 +72,59 @@ const server = http.createServer((req, res) => {
           res.end(buffer);
         } catch (e) {
           console.error('[generate-excel ERROR]', e.message, e.stack);
+          res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+          res.end(JSON.stringify({ error: e.message }));
+        }
+      });
+      return;
+    }
+
+    /* ── POST /api/preview : 견적서 미리보기 JSON ── */
+    if (req.method === 'POST' && pathname === '/api/preview') {
+      const chunks = [];
+      req.on('data', chunk => { chunks.push(chunk); });
+      req.on('end', async () => {
+        try {
+          const body = Buffer.concat(chunks).toString('utf8');
+          const data   = JSON.parse(body);
+          const isSmartTpl = data.template && data.template.includes('스마트');
+          const buffer = await (isSmartTpl ? generateSmartQuote(data) : generateQuote(data));
+          const preview = await extractPreviewData(buffer);
+          res.writeHead(200, {
+            'Content-Type': 'application/json; charset=utf-8',
+            'Access-Control-Allow-Origin': '*',
+          });
+          res.end(JSON.stringify(preview));
+        } catch (e) {
+          console.error('[preview ERROR]', e.message, e.stack);
+          res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+          res.end(JSON.stringify({ error: e.message }));
+        }
+      });
+      return;
+    }
+
+    /* ── POST /api/generate-purchase-request : 구매요청서 생성 ── */
+    if (req.method === 'POST' && pathname === '/api/generate-purchase-request') {
+      const chunks = [];
+      req.on('data', chunk => { chunks.push(chunk); });
+      req.on('end', async () => {
+        try {
+          const body = Buffer.concat(chunks).toString('utf8');
+          const data = JSON.parse(body);
+          const buffer = await generatePurchaseRequest(data);
+          const fname = encodeURIComponent(
+            `구매요청서_${data.client || 'OPENWORKS'}_${data.date || ''}.xlsx`
+          );
+          res.writeHead(200, {
+            'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            'Content-Disposition': `attachment; filename*=UTF-8''${fname}`,
+            'Content-Length': buffer.length,
+            'Access-Control-Allow-Origin': '*',
+          });
+          res.end(buffer);
+        } catch (e) {
+          console.error('[purchase-request ERROR]', e.message, e.stack);
           res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
           res.end(JSON.stringify({ error: e.message }));
         }

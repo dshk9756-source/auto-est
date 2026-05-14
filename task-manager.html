@@ -252,16 +252,20 @@ function addMonth(tab, val) {
 }
 
 /* ── 마감기한 ── */
+function parseLocalDate(s) {
+  const [y, m, d] = s.split('-').map(Number);
+  return new Date(y, m - 1, d);
+}
 function deadlineClass(s) {
   if (!s) return '';
   const today = new Date(); today.setHours(0,0,0,0);
-  const diff = Math.ceil((new Date(s) - today) / 86400000);
+  const diff = Math.ceil((parseLocalDate(s) - today) / 86400000);
   return diff < 0 ? 'overdue' : diff <= 3 ? 'near' : '';
 }
 function deadlineLabel(s) {
   if (!s) return '';
   const today = new Date(); today.setHours(0,0,0,0);
-  const diff = Math.ceil((new Date(s) - today) / 86400000);
+  const diff = Math.ceil((parseLocalDate(s) - today) / 86400000);
   const lbl = s.replace(/-/g, '/');
   if (diff < 0)  return `마감 ${lbl} (${Math.abs(diff)}일 초과)`;
   if (diff === 0) return `마감 ${lbl} (오늘)`;
