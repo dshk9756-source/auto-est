@@ -207,6 +207,7 @@ function findMarkers(ws) {
     topGroupFirst:   -1,  // 첫 {{TOP_GROUP_N}} 행
     topGroupLast:    -1,  // 마지막 {{TOP_GROUP_N}} 행 (반복 템플릿 기준)
     safetyNoteRows:  [],  // {{SAFETY_NOTE_ROW}} 행 목록 (안전관리 그룹 전용)
+    summaryRow:      -1,  // {{SUMMARY_ROW}} → 견적집계표 데이터 행 (씨앤코)
   };
   ws.eachRow((row, rn) => {
     row.eachCell({ includeEmpty: false }, cell => {
@@ -227,6 +228,7 @@ function findMarkers(ws) {
         m.topGroupLast = rn;
       }
       if (v.includes('{{SAFETY_NOTE_ROW}}')) m.safetyNoteRows.push(rn);
+      if (v.includes('{{SUMMARY_ROW}}') && m.summaryRow < 0) m.summaryRow = rn;
     });
   });
   return m;
@@ -263,6 +265,44 @@ function numberToHanja(n) {
   return result;
 }
 
+function numberToKorean(n) {
+  const num = Math.round(Math.abs(n));
+  if (num === 0) return '영';
+  const digits = ['', '일', '이', '삼', '사', '오', '육', '칠', '팔', '구'];
+  const units  = ['', '십', '백', '천'];
+  const bigs   = ['', '만', '억', '조'];
+  const groups = [];
+  let remaining = num;
+  while (remaining > 0) {
+    groups.push(remaining % 10000);
+    remaining = Math.floor(remaining / 10000);
+  }
+  let result = '';
+  for (let i = groups.length - 1; i >= 0; i--) {
+    let g = groups[i];
+    if (g === 0) continue;
+    let part = '';
+    for (let u = 3; u >= 0; u--) {
+      const d = Math.floor(g / Math.pow(10, u)) % 10;
+      if (d === 0) continue;
+      part += digits[d] + units[u];
+    }
+    result += part + bigs[i];
+  }
+  return result;
+}
+
+function formatDateJapanese(dateStr) {
+  if (!dateStr) return '';
+  const d = new Date(dateStr);
+  if (isNaN(d.getTime())) {
+    const m = String(dateStr).match(/(\d{4})\D+(\d{1,2})\D+(\d{1,2})/);
+    if (m) return `${m[1]} 年 ${parseInt(m[2])} 月 ${parseInt(m[3])}日`;
+    return dateStr;
+  }
+  return `${d.getFullYear()} 年 ${d.getMonth() + 1} 月 ${d.getDate()}日`;
+}
+
 function calcSupplyTotal(items) {
   let s = 0;
   for (const it of (items || [])) {
@@ -292,15 +332,34 @@ function fillHeader(ws, data, markers) {
     '{{담당자}}':          data.manager || '',
     '{{연락처}}':          data.contact || '',
     '{{견적일자}}':         data.date    || '',
+    '{{견적일자_일본식}}':  formatDateJapanese(data.date),
     '{{견적명}}':           data.site    || '',
     '{{합계금액}}':         supplyStr,
     '{{합계금액_한자}}':    numberToHanja(supply),
+    '{{합계금액_한글}}':    numberToKorean(supply),
   };
 
   ws.eachRow((row, rn) => {
     if (rn > stopRow) return;
 
     row.eachCell({ includeEmpty: false }, cell => {
+      // richText 안에 마커가 있는 경우 → 텍스트 결합 후 치환, 단일 문자열로 변환
+      if (cell.value && typeof cell.value === 'object' && cell.value.richText) {
+        const combined = cell.value.richText.map(r => r.text).join('');
+        let hasMarker = false;
+        for (const ph of Object.keys(phMap)) {
+          if (combined.includes(ph)) { hasMarker = true; break; }
+        }
+        if (hasMarker) {
+          let v = combined;
+          for (const [ph, val] of Object.entries(phMap)) {
+            if (v.includes(ph)) v = v.replace(ph, val);
+          }
+          cell.value = v;
+        }
+        return;
+      }
+
       // 수식 안에 마커가 있는 경우 → 수식 결과(문자열)로 변환
       if (cell.value && typeof cell.value === 'object' && cell.value.formula) {
         const result = String(cell.value.result ?? '');
@@ -454,6 +513,10 @@ async function generateQuote(data) {
   const ws = wb.worksheets[0];
   if (!ws) throw new Error('템플릿에서 시트를 찾을 수 없습니다.');
 
+  // 씨앤코 템플릿 감지 — 컬럼 구조가 다르므로 별도 매핑 사용
+  const tplName = path.basename(tplFile);
+  const isCnco = tplName.includes('씨앤코') || tplName.includes('씨엔코') || tplName.includes('cnco');
+
   /* ── 2. 마커 탐색 */
   const markers = findMarkers(ws);
   const { start, end, headerRow, groupTitleFirst, groupTitle, itemRow, subtotalRow, emptyRow, grandTotal, safetyNoteRows } = markers;
@@ -489,15 +552,108 @@ async function generateQuote(data) {
   /* ── 6. 헤더 플레이스홀더 치환 ({{TOP_GROUP_N}} 제외) */
   fillHeader(ws, data, markers);
 
+  /* ── 6b. 견적집계표 확장 ({{SUMMARY_ROW}} 기반, 씨앤코 등)
+          카테고리별 한 행씩 삽입: 공종명, 단위=식, 수량=카테고리 아이템 수, 공급단가=소계 */
+  let summaryDelta = 0;
+  if (isCnco && markers.summaryRow > 0) {
+    const sr = markers.summaryRow;
+    const summarySnap = snapshotRow(ws, sr);
+
+    // 카테고리별 집계
+    const catStats = [];
+    const items = data.items || [];
+    const seen = new Set();
+    for (const it of items) {
+      const cat = it.cat || '기타';
+      if (!seen.has(cat)) {
+        seen.add(cat);
+        catStats.push({ name: cat, qty: 0, total: 0 });
+      }
+      const entry = catStats.find(c => c.name === cat);
+      const qty = it.qty || it.mult || 1;
+      const price = it.effectiveP || 0;
+      if (it.type === 'set' && it.members) {
+        for (const m of it.members) entry.total += (m.effectiveP || 0) * (m.q || 1) * qty;
+      } else {
+        entry.total += price * qty;
+      }
+      entry.qty += 1;
+    }
+
+    // SUMMARY_ROW 아래 병합을 spliceRows 전에 캡처 (ExcelJS가 깨뜨리므로)
+    const summaryBelowMerges = [];
+    if (ws._merges) {
+      Object.keys(ws._merges).forEach(k => {
+        const { top, left, bottom, right } = ws._merges[k].model;
+        if (top > sr && top <= markers.end) {
+          summaryBelowMerges.push({ top, left, bottom, right });
+          delete ws._merges[k];
+        }
+      });
+      // 기존 SUMMARY_ROW 행의 병합도 제거
+      Object.keys(ws._merges)
+        .filter(k => ws._merges[k].model.top === sr && ws._merges[k].model.bottom === sr)
+        .forEach(k => delete ws._merges[k]);
+    }
+    ws.spliceRows(sr, 1);
+
+    // 카테고리 수만큼 새 행 삽입
+    if (catStats.length > 0) {
+      ws.spliceRows(sr, 0, ...catStats.map(() => []));
+      catStats.forEach((cat, i) => {
+        const rn = sr + i;
+        stampRow(ws, rn, summarySnap, {
+          2: cat.name,
+          3: '식',
+          4: 1,
+          5: cat.total,
+        });
+        ws.getRow(rn).getCell(4).numFmt = '#,##0';
+        ws.getRow(rn).getCell(5).numFmt = NUM_FMT;
+      });
+    }
+
+    summaryDelta = catStats.length - 1;
+
+    // 캡처한 병합을 summaryDelta 만큼 이동하여 재적용
+    summaryBelowMerges.forEach(({ top, left, bottom, right }) => {
+      ws.mergeCells(top + summaryDelta, left, bottom + summaryDelta, right);
+    });
+
+    // 집계표 합계 행(sr + catStats.length)의 SUM 수식 갱신
+    const sumRow = sr + catStats.length;
+    const sumCell = ws.getRow(sumRow).getCell(5);
+    if (catStats.length > 0) {
+      sumCell.value = { formula: `SUM(E${sr}:E${sr + catStats.length - 1})` };
+    }
+    sumCell.numFmt = NUM_FMT;
+
+    // 이후 마커 위치를 summaryDelta만큼 보정
+    markers.start += summaryDelta;
+    markers.end += summaryDelta;
+    if (markers.headerRow > 0) markers.headerRow += summaryDelta;
+    if (markers.groupTitleFirst > 0) markers.groupTitleFirst += summaryDelta;
+    if (markers.groupTitle > 0) markers.groupTitle += summaryDelta;
+    if (markers.itemRow > 0) markers.itemRow += summaryDelta;
+    if (markers.subtotalRow > 0) markers.subtotalRow += summaryDelta;
+    if (markers.emptyRow > 0) markers.emptyRow += summaryDelta;
+    if (markers.grandTotal > 0) markers.grandTotal += summaryDelta;
+    if (markers.topGroupFirst > 0) markers.topGroupFirst += summaryDelta;
+    if (markers.topGroupLast > 0) markers.topGroupLast += summaryDelta;
+  }
+
   /* ── 6a. TOP_GROUP 동적 확장
           헤더에서 행이 추가·삭제되므로, 이후 마커 행 번호를 delta만큼 보정 */
   const topDelta    = expandTopGroups(ws, markers, groupKeys);
 
   /* ── 7. 마커 구역 삭제 (HEADER_ROW 또는 첫 GROUP_TITLE ~ ITEM_END 포함)
-          topDelta 만큼 보정된 행 번호를 사용 */
-  const deleteFrom  = (headerRow > 0 && headerRow < groupTitleFirst) ? headerRow : groupTitleFirst;
+          summaryDelta + topDelta 만큼 보정된 행 번호를 사용 */
+  const adjHeaderRow      = markers.headerRow;
+  const adjGroupTitleFirst = markers.groupTitleFirst;
+  const adjEnd            = markers.end;
+  const deleteFrom  = (adjHeaderRow > 0 && adjHeaderRow < adjGroupTitleFirst) ? adjHeaderRow : adjGroupTitleFirst;
   const insertAt    = deleteFrom + topDelta;
-  const deleteCount = (end + topDelta) - insertAt + 1;
+  const deleteCount = (adjEnd + topDelta) - insertAt + 1;
 
   // spliceRows 전에 삭제 범위 내 병합 항목을 _merges 에서 선제 제거한다.
   // ExcelJS spliceRows 는 삭제된 행의 _merges 항목을 자동 정리하지 않아,
@@ -522,54 +678,77 @@ async function generateQuote(data) {
         추적한다. subtotalRows 배열에 소계 행 번호를 기록하여 합계 수식에 사용. */
   let groupItemStart = -1;  // 현재 그룹의 첫 item 행 번호
   const subtotalRows = [];  // 소계 행 번호 목록 (합계 수식용)
+  let cncoItemSeq = 0;      // 씨앤코 자동 번호
 
   plan.forEach((p, i) => {
     const rn = insertAt + i;
 
     if (p.type === 'header' && headerRowSnap) {
-      // 컬럼 헤더 행 — 템플릿 원본 텍스트 그대로 사용 (override 없음)
       stampRow(ws, rn, headerRowSnap);
-      groupItemStart = -1; // 새 그룹 시작 전 리셋
+      groupItemStart = -1;
 
     } else if (p.type === 'group_title') {
-      // 템플릿 GROUP_TITLE 행의 스타일·병합 그대로 + 그룹명
-      stampRow(ws, rn, groupTitleSnap, { 1: ' ' + p.name });
+      if (isCnco) {
+        stampRow(ws, rn, groupTitleSnap, { 2: ' ' + p.name });
+      } else {
+        stampRow(ws, rn, groupTitleSnap, { 1: ' ' + p.name });
+      }
 
     } else if (p.type === 'item') {
-      if (groupItemStart < 0) groupItemStart = rn; // 첫 아이템 행 기록
-      // 템플릿 ITEM_ROW 행의 스타일·병합 그대로 + 데이터
-      stampRow(ws, rn, itemRowSnap, {
-        1: p.col_a,
-        2: p.col_b,
-        3: p.col_c > 0 ? p.col_c : 0,
-        4: p.col_d,
-        5: { formula: `C${rn}*D${rn}` },
-        6: p.col_f,
-      });
-      // 숫자 서식 (stampRow 이후 덮어쓰기)
-      ws.getRow(rn).getCell(3).numFmt = NUM_FMT;
-      ws.getRow(rn).getCell(4).numFmt = '#,##0';
-      ws.getRow(rn).getCell(5).numFmt = NUM_FMT;
-      // wrapText 명시 적용 (품목명·사양·비고) — 열 너비는 건드리지 않음
-      [1, 2, 6].forEach(c => {
-        const cell = ws.getRow(rn).getCell(c);
-        cell.alignment = { ...(cell.alignment || {}), wrapText: true };
-      });
-      // 맑은고딕 10pt 기준 행 높이 자동 계산 (줄바꿈 \r\n 포함)
-      // 템플릿 기본 높이보다 작아지지 않도록 max 처리
+      if (groupItemStart < 0) groupItemStart = rn;
+
+      if (isCnco) {
+        // 씨앤코: A=번호, B=사양(품명+규격), C=단위, D=수량, E=단가, F=금액(=E*D), G=비고(빈칸)
+        cncoItemSeq++;
+        const spec = [p.col_a, p.col_b].filter(Boolean).join(' ');
+        stampRow(ws, rn, itemRowSnap, {
+          1: cncoItemSeq,
+          2: spec,
+          3: p.col_f || '식',
+          4: p.col_d,
+          5: p.col_c > 0 ? p.col_c : 0,
+          6: { formula: `E${rn}*D${rn}` },
+          7: null,
+        });
+        ws.getRow(rn).getCell(4).numFmt = '#,##0';
+        ws.getRow(rn).getCell(5).numFmt = NUM_FMT;
+        ws.getRow(rn).getCell(6).numFmt = NUM_FMT;
+        [2].forEach(c => {
+          const cell = ws.getRow(rn).getCell(c);
+          cell.alignment = { ...(cell.alignment || {}), wrapText: true };
+        });
+      } else {
+        // 기본: A=품명, B=규격, C=단가, D=수량, E=금액(=C*D), F=비고
+        stampRow(ws, rn, itemRowSnap, {
+          1: p.col_a,
+          2: p.col_b,
+          3: p.col_c > 0 ? p.col_c : 0,
+          4: p.col_d,
+          5: { formula: `C${rn}*D${rn}` },
+          6: p.col_f,
+        });
+        ws.getRow(rn).getCell(3).numFmt = NUM_FMT;
+        ws.getRow(rn).getCell(4).numFmt = '#,##0';
+        ws.getRow(rn).getCell(5).numFmt = NUM_FMT;
+        [1, 2, 6].forEach(c => {
+          const cell = ws.getRow(rn).getCell(c);
+          cell.alignment = { ...(cell.alignment || {}), wrapText: true };
+        });
+      }
       ws.getRow(rn).height = Math.max(calcRowHeight(ws, rn), itemRowSnap.height || 0);
 
     } else if (p.type === 'subtotal' && subtotalRowSnap) {
-      // 소계 행 — 템플릿 원본 텍스트 그대로 + C5에 SUM 수식만 override
+      const sumCol = isCnco ? 'F' : 'E';
       const sumFormula = groupItemStart > 0
-        ? `SUM(E${groupItemStart}:E${rn - 1})`
-        : 'SUM(E0:E0)'; // fallback (발생하지 않아야 함)
+        ? `SUM(${sumCol}${groupItemStart}:${sumCol}${rn - 1})`
+        : `SUM(${sumCol}0:${sumCol}0)`;
+      const sumCellIdx = isCnco ? 6 : 5;
       stampRow(ws, rn, subtotalRowSnap, {
-        5: { formula: sumFormula },
+        [sumCellIdx]: { formula: sumFormula },
       });
-      ws.getRow(rn).getCell(5).numFmt = NUM_FMT;
+      ws.getRow(rn).getCell(sumCellIdx).numFmt = NUM_FMT;
       subtotalRows.push(rn);
-      groupItemStart = -1; // 리셋
+      groupItemStart = -1;
 
     } else if (p.type === 'safety_note' && safetyNoteSnaps.length > 0) {
       const snap = safetyNoteSnaps[p.idx] || safetyNoteSnaps[0];
@@ -608,8 +787,10 @@ async function generateQuote(data) {
   }
 
   // ② 올바른 새 위치에 병합 재적용
+  //    footerMergesOrig 는 원본 위치 기준이므로 summaryDelta도 가산
+  const fullFooterShift = summaryDelta + footerNetShift;
   footerMergesOrig.forEach(({ top, left, bottom, right }) => {
-    ws.mergeCells(top + footerNetShift, left, bottom + footerNetShift, right);
+    ws.mergeCells(top + fullFooterShift, left, bottom + fullFooterShift, right);
   });
 
   /* ── 9.6. 특기사항 처리 ─────────────────────────────────────────────────
@@ -681,22 +862,23 @@ async function generateQuote(data) {
     }
   }
 
-  /* ── 10. 합계 행 SUM 수식 갱신  ─  {{GRAND_TOTAL}} 마커 기반
-         마커가 있던 행을 찾아 C5에 소계 합산 수식을 넣고, C7 마커를 제거한다. */
-  if (grandTotal > 0) {
-    const gtRow = grandTotal + footerNetShift;
-    const gtCell = ws.getRow(gtRow).getCell(5);
+  /* ── 10. 합계 행 SUM 수식 갱신  ─  {{GRAND_TOTAL}} 마커 기반 */
+  if (markers.grandTotal > 0) {
+    const gtRow = markers.grandTotal + footerNetShift;
+    const sumCol    = isCnco ? 'F' : 'E';
+    const sumCellIdx = isCnco ? 6 : 5;
+    const gtCell = ws.getRow(gtRow).getCell(sumCellIdx);
 
     if (subtotalRows.length > 0) {
-      const refs = subtotalRows.map(sr => `E${sr}`).join(',');
+      const refs = subtotalRows.map(sr => `${sumCol}${sr}`).join(',');
       gtCell.value = { formula: `SUM(${refs})` };
     } else {
-      gtCell.value = { formula: `SUM(E${insertAt}:E${gtRow - 1})` };
+      gtCell.value = { formula: `SUM(${sumCol}${insertAt}:${sumCol}${gtRow - 1})` };
     }
     gtCell.numFmt = NUM_FMT;
 
-    // C7 마커 텍스트 제거
-    const markerCell = ws.getRow(gtRow).getCell(7);
+    const markerColIdx = 7;
+    const markerCell = ws.getRow(gtRow).getCell(markerColIdx);
     if (markerCell.value && String(markerCell.value).includes('{{GRAND_TOTAL}}')) {
       markerCell.value = null;
     }

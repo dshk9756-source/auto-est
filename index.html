@@ -94,6 +94,18 @@
       <div class="tr-div"></div>
       <div class="tr-grand"><span class="tg-lbl">TOTAL</span><span class="tg-val" id="t-total">—</span></div>
       <div class="tr-note">단가 수정 시 자동 반영 · 별도협의 제외</div>
+      <div class="markup-row" id="markup-row" style="display:none">
+        <span class="markup-lbl">단가 일괄 조정</span>
+        <div class="markup-controls">
+          <input type="text" id="markup-pct" class="markup-input" placeholder="%" value="10">
+          <span class="markup-unit">%</span>
+          <button class="markup-btn up" onclick="applyMarkup(1)">인상</button>
+          <button class="markup-btn down" onclick="applyMarkup(-1)">인하</button>
+        </div>
+        <div class="markup-opt">
+          <label><input type="checkbox" id="markup-round" checked> 만원 단위 반올림</label>
+        </div>
+      </div>
       <button class="preview-btn" id="preview-btn" onclick="previewExcel()" disabled>미리보기</button>
       <button class="excel-btn" id="excel-btn" onclick="generateExcel()" disabled>엑셀 다운로드</button>
       <button class="purchase-btn" id="purchase-btn" onclick="openPurchaseModal()" disabled>구매요청서</button>

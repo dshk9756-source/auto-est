@@ -477,6 +477,7 @@ function renderCart(){
     const excelBtnE=document.getElementById('excel-btn');if(excelBtnE)excelBtnE.disabled=true;
     const pvBtnE=document.getElementById('preview-btn');if(pvBtnE)pvBtnE.disabled=true;
     const prBtnE=document.getElementById('purchase-btn');if(prBtnE)prBtnE.disabled=true;
+    const mkRowE=document.getElementById('markup-row');if(mkRowE)mkRowE.style.display='none';
     return;
   }
   let html='';
@@ -542,6 +543,8 @@ function renderCart(){
   if(pvBtn)pvBtn.disabled=false;
   const prBtn=document.getElementById('purchase-btn');
   if(prBtn)prBtn.disabled=false;
+  const mkRow=document.getElementById('markup-row');
+  if(mkRow)mkRow.style.display='';
 }
 
 function recalcTotals(){
@@ -560,6 +563,32 @@ function rmCart(id){
   renderCart();syncSteps();
 }
 function clearCart(){cart={};document.querySelectorAll('.pc.sel').forEach(el=>el.classList.remove('sel'));renderCart();syncSteps();}
+
+function applyMarkup(dir) {
+  const pctVal = parseFloat(document.getElementById('markup-pct').value) || 0;
+  if (pctVal <= 0) return alert('퍼센트를 입력하세요.');
+  const rate = 1 + (dir * pctVal / 100);
+  const roundTo10k = document.getElementById('markup-round').checked;
+
+  for (const id of Object.keys(cart)) {
+    const c = cart[id];
+    if (c.type === 'set') {
+      c.members.forEach((m, i) => {
+        let np = Math.round(m.p * rate);
+        if (roundTo10k) np = Math.round(np / 10000) * 10000;
+        m.p = Math.max(0, np);
+        if (c.customPrices && c.customPrices[i] !== undefined) {
+          c.customPrices[i] = m.p;
+        }
+      });
+    } else {
+      let np = Math.round((c.price || 0) * rate);
+      if (roundTo10k) np = Math.round(np / 10000) * 10000;
+      c.price = Math.max(0, np);
+    }
+  }
+  renderCart(); syncSteps();
+}
 
 /* ── 카탈로그 → 견적 구성 드래그 앤 드롭 ────────────────────────── */
 function onCatalogDragStart(e, type, id){

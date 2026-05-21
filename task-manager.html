@@ -85,6 +85,18 @@ select { padding: 4px 8px; border: 1px solid #2e2e4e; border-radius: 4px; font-s
 .trash-fab:hover { background: #5a2a2a; }
 .trash-fab .badge { position: absolute; top: -4px; right: -4px; background: #b03030; color: #fff; font-size: 0.65rem; min-width: 18px; height: 18px; border-radius: 9px; display: flex; align-items: center; justify-content: center; padding: 0 4px; font-weight: 700; }
 
+.done-fab { position: fixed; bottom: 24px; left: 24px; width: 52px; height: 52px; border-radius: 50%; background: #1e3a1e; border: 1px solid #2a5a2a; color: #fff; font-size: 1.4rem; cursor: pointer; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 16px rgba(0,0,0,0.5); transition: background 0.15s; z-index: 100; }
+.done-fab:hover { background: #2a5a2a; }
+.done-fab .badge { position: absolute; top: -4px; right: -4px; background: #2a7a3a; color: #fff; font-size: 0.65rem; min-width: 18px; height: 18px; border-radius: 9px; display: flex; align-items: center; justify-content: center; padding: 0 4px; font-weight: 700; }
+
+.done-tab-btns { display: flex; gap: 4px; margin-bottom: 12px; }
+.done-tab-btn { flex: 1; padding: 8px; border: 1px solid #2e2e4e; background: #22223a; color: #aaa; cursor: pointer; font-size: 0.8rem; border-radius: 4px; transition: background 0.15s; }
+.done-tab-btn:hover { background: #2a2a4a; }
+.done-tab-btn.active { background: #2a6b3a; color: #fff; border-color: #2a6b3a; }
+.done-item { background: #1a2e1a; border-color: #2a4a2a !important; }
+.done-item .memo-header:hover { background: #1e351e; }
+.done-completed-date { font-size: 0.75rem; color: #6a9a6a; }
+
 /* 모달 */
 .modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: 200; }
 .modal-overlay.open { display: flex; align-items: flex-end; justify-content: center; }
@@ -169,8 +181,32 @@ input::placeholder { color: #6060a0; }
   <div id="sales-list"></div>
 </div>
 
+<!-- 완료 보관함 FAB -->
+<button class="done-fab" onclick="openDoneArchive()" title="완료 보관함">✓</button>
+
 <!-- 휴지통 FAB -->
 <button class="trash-fab" onclick="openTrash()" title="휴지통">🗑</button>
+
+<!-- 완료 보관함 모달 -->
+<div class="modal-overlay" id="done-modal" onclick="if(event.target===this)closeDoneArchive()">
+  <div class="modal-box">
+    <div class="modal-header">
+      <h2>✓ 완료 보관함</h2>
+      <div class="modal-header-btns">
+        <button class="modal-close" onclick="closeDoneArchive()">✕</button>
+      </div>
+    </div>
+    <div class="modal-body">
+      <div class="done-tab-btns" id="done-tab-btns">
+        <button class="done-tab-btn active" data-donetab="daily" onclick="switchDoneTab('daily')">금일 업무</button>
+        <button class="done-tab-btn" data-donetab="weekly" onclick="switchDoneTab('weekly')">주간 업무</button>
+        <button class="done-tab-btn" data-donetab="finance" onclick="switchDoneTab('finance')">매출 관리</button>
+        <button class="done-tab-btn" data-donetab="sales" onclick="switchDoneTab('sales')">영업 업무</button>
+      </div>
+      <div id="done-list"></div>
+    </div>
+  </div>
+</div>
 
 <!-- 휴지통 모달 -->
 <div class="modal-overlay" id="trash-modal" onclick="closeTrashOnBg(event)">
@@ -288,9 +324,9 @@ function addMemo(tab) {
 
 function sortedItems(tab) {
   const sel = getSelectedMonths(tab);
-  const items = data[tab].filter(m => sel.includes(m.month));
+  const items = data[tab].filter(m => sel.includes(m.month) && m.status !== 'done');
   const pinned   = items.filter(m => m.pinned);
-  const statusOrder = { progress: 0, before: 1, hold: 2, done: 3 };
+  const statusOrder = { progress: 0, before: 1, hold: 2 };
   const unpinned = items.filter(m => !m.pinned).sort((a, b) => (statusOrder[a.status] ?? 9) - (statusOrder[b.status] ?? 9));
   return [...pinned, ...unpinned];
 }
@@ -373,6 +409,7 @@ function updateMemo(tab, id, field, value) {
       const el = document.querySelector(`#${tab}-list [data-id="${oid}"]`);
       if (el) { el.classList.add('open'); const ta = el.querySelector('textarea'); if (ta) autoResize(ta); }
     });
+    if (field === 'status') updateDoneBadge();
   }
 }
 
@@ -381,7 +418,7 @@ function deleteMemo(tab, id) {
   if (item) {
     data.trash.unshift({ ...item, deletedFrom: tab, deletedAt: new Date().toISOString() });
     data[tab] = data[tab].filter(m => m.id !== id);
-    save(); render(tab); updateTrashBadge();
+    save(); render(tab); updateTrashBadge(); updateDoneBadge();
   }
 }
 
@@ -410,18 +447,13 @@ function addFinance() {
 function renderFinance() {
   const list     = document.getElementById('finance-list');
   const selected = getSelectedMonths('finance');
-  const items    = data.finance.filter(f => selected.includes(f.month));
+  const items    = data.finance.filter(f => selected.includes(f.month) && (f.fstatus || 'discuss') !== 'done');
   if (!items.length) {
     list.innerHTML = '<div class="empty">등록된 항목이 없습니다</div>';
     document.getElementById('finance-total').textContent = '';
     return;
   }
-  const sorted = [...items].sort((a,b) => {
-    const aDown = (a.fstatus||'discuss') === 'done' ? 1 : 0;
-    const bDown = (b.fstatus||'discuss') === 'done' ? 1 : 0;
-    if (aDown !== bDown) return aDown - bDown;
-    return a.month.localeCompare(b.month) || a.id - b.id;
-  });
+  const sorted = [...items].sort((a,b) => a.month.localeCompare(b.month) || a.id - b.id);
   list.innerHTML = sorted.map(f => {
     const fs = f.fstatus || 'discuss';
     return `
@@ -465,7 +497,7 @@ function renderFinance() {
 
 function updateFinance(id, field, value) {
   const item = data.finance.find(f => f.id === id);
-  if (item) { item[field] = value; save(); if (field !== 'content') render('finance'); }
+  if (item) { item[field] = value; save(); if (field !== 'content') { render('finance'); if (field === 'fstatus') updateDoneBadge(); } }
 }
 
 function deleteFinance(id) {
@@ -473,7 +505,7 @@ function deleteFinance(id) {
   if (item) {
     data.trash.unshift({ ...item, deletedFrom: 'finance', deletedAt: new Date().toISOString() });
     data.finance = data.finance.filter(f => f.id !== id);
-    save(); render('finance'); updateTrashBadge();
+    save(); render('finance'); updateTrashBadge(); updateDoneBadge();
   }
 }
 
@@ -558,7 +590,7 @@ function restoreItem(id) {
   if (data[deletedFrom]) {
     data[deletedFrom].push(restored);
     data.trash = data.trash.filter(t => t.id !== id);
-    save(); renderTrash(); updateTrashBadge();
+    save(); renderTrash(); updateTrashBadge(); updateDoneBadge();
   }
 }
 function permanentDelete(id) {
@@ -716,11 +748,96 @@ function importData(input) {
   input.value = '';
 }
 
+/* ── 완료 보관함 ── */
+let doneActiveTab = 'daily';
+
+function openDoneArchive() {
+  doneActiveTab = 'daily';
+  document.querySelectorAll('.done-tab-btn').forEach(b => b.classList.toggle('active', b.dataset.donetab === 'daily'));
+  renderDoneList();
+  document.getElementById('done-modal').classList.add('open');
+}
+function closeDoneArchive() {
+  document.getElementById('done-modal').classList.remove('open');
+}
+function switchDoneTab(tab) {
+  doneActiveTab = tab;
+  document.querySelectorAll('.done-tab-btn').forEach(b => b.classList.toggle('active', b.dataset.donetab === tab));
+  renderDoneList();
+}
+
+function renderDoneList() {
+  const list = document.getElementById('done-list');
+  if (doneActiveTab === 'finance') {
+    const items = data.finance.filter(f => (f.fstatus || 'discuss') === 'done');
+    if (!items.length) { list.innerHTML = '<div class="empty">완료된 항목이 없습니다</div>'; return; }
+    const sorted = [...items].sort((a, b) => b.id - a.id);
+    list.innerHTML = sorted.map(f => `
+      <div class="memo-item done-item" data-id="${f.id}">
+        <div class="memo-header" onclick="toggleMemoSimple(this)">
+          <span class="${FINANCE_SCLASS['done']}">${FINANCE_STATUS['done']}</span>
+          <span class="memo-title">${esc(f.name)}</span>
+          <div class="memo-meta">
+            <span class="finance-amount-badge">₩ ${formatAmount(f.amount)}</span>
+            <span class="finance-month-badge">${formatMonth(f.month)}</span>
+          </div>
+        </div>
+        <div class="memo-body">
+          ${f.content ? `<textarea readonly style="opacity:0.7">${esc(f.content)}</textarea>` : ''}
+          <div class="memo-actions" style="margin-top:8px">
+            <span class="done-completed-date">월: ${formatMonth(f.month)}</span>
+          </div>
+        </div>
+      </div>`).join('');
+    return;
+  }
+
+  const items = data[doneActiveTab].filter(m => m.status === 'done');
+  if (!items.length) { list.innerHTML = '<div class="empty">완료된 업무가 없습니다</div>'; return; }
+  const sorted = [...items].sort((a, b) => b.id - a.id);
+  list.innerHTML = sorted.map(m => {
+    const dl = m.deadline || '';
+    const dlLabel = deadlineLabel(dl);
+    return `
+    <div class="memo-item done-item" data-id="${m.id}">
+      <div class="memo-header" onclick="toggleMemoSimple(this)">
+        <span class="status-badge status-done">완료</span>
+        <span class="memo-title">${esc(m.title)}</span>
+        <div class="memo-meta">
+          ${dlLabel ? `<span class="deadline-badge">${dlLabel}</span>` : ''}
+          <span class="done-completed-date">${formatMonth(m.month)}</span>
+        </div>
+      </div>
+      <div class="memo-body">
+        ${m.content ? `<textarea readonly style="opacity:0.7">${esc(m.content)}</textarea>` : ''}
+        <div class="memo-actions" style="margin-top:8px">
+          <span class="done-completed-date">등록일: ${formatDate(m.created)}</span>
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function updateDoneBadge() {
+  const fab = document.querySelector('.done-fab');
+  const count = ['daily','weekly','sales'].reduce((s, tab) => s + data[tab].filter(m => m.status === 'done').length, 0)
+    + data.finance.filter(f => (f.fstatus || 'discuss') === 'done').length;
+  const existing = fab.querySelector('.badge');
+  if (existing) existing.remove();
+  if (count > 0) {
+    const badge = document.createElement('span');
+    badge.className = 'badge';
+    badge.textContent = count;
+    fab.appendChild(badge);
+  }
+}
+
 render('daily');
 render('weekly');
 render('finance');
 render('sales');
 updateTrashBadge();
+updateDoneBadge();
 </script>
 </body>
 </html>

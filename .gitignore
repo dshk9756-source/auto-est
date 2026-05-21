@@ -13,6 +13,9 @@ npm-debug.log*
 .DS_Store
 Thumbs.db
 
+# 테스트 출력
+test_*.xlsx
+
 # 에디터
 .vscode/
 .idea/
