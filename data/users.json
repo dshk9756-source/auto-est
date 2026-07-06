@@ -1,0 +1,23 @@
+[
+  {
+    "id": "admin",
+    "pw": "$2b$10$9DEUA.5bmfjll42fGAR7..Z3j9tkl09Iw.VkihGmodbdseQZ9Rk3O",
+    "role": "admin",
+    "name": "관리자",
+    "team": ""
+  },
+  {
+    "id": "user",
+    "pw": "$2b$10$IGDTXx1cP7WQUp29imG7NujqMziLYtuG9b4u3wsts6sOhC42Nm6Aq",
+    "role": "user",
+    "name": "일반사용자",
+    "team": ""
+  },
+  {
+    "id": "이정우",
+    "pw": "$2b$10$Rx04Fd3YhGGMylCXMCfz0.mABEPZTvbsYya.spdkYDdeFgitVdu9m",
+    "role": "user",
+    "name": "이정우",
+    "team": "스마트건설팀"
+  }
+]

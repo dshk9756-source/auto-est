@@ -1,5 +1,111 @@
-﻿/** 카탈로그: data/catalog.xlsx — 시트/컬럼은 scripts/build-catalog.mjs 참고 */
-const CATALOG_XLSX = "data/catalog.xlsx";
+﻿/* ── 세션 확인 & 로그아웃 ─────────────────────────────────────── */
+(async function checkSession(){
+  try{
+    const r = await fetch('/api/auth/me');
+    if(!r.ok) return;
+    const u = await r.json();
+    const el = document.getElementById('h-user');
+    const nameEl = document.getElementById('h-user-name');
+    if(el && nameEl){
+      const badge = u.role==='admin'
+        ? '<span class="role-badge role-admin">관리자</span>'
+        : '<span class="role-badge role-user">일반</span>';
+      nameEl.innerHTML = u.name + badge;
+      el.style.display = 'flex';
+    }
+    // 관리자만 관리 링크 표시
+    if(u.role==='admin'){
+      const adminLink = document.getElementById('admin-link');
+      if(adminLink) adminLink.style.display = 'inline-flex';
+      const accountsLink = document.getElementById('accounts-link');
+      if(accountsLink) accountsLink.style.display = 'inline-flex';
+    }
+  }catch(e){}
+})();
+
+async function doLogout(){
+  try{
+    await fetch('/api/auth/logout',{method:'POST'});
+  }catch(e){}
+  location.href = '/login.html';
+}
+
+/* ── 비밀번호 변경 ─────────────────────────────────────── */
+function openPwModal(){
+  document.getElementById('pw-current').value = '';
+  document.getElementById('pw-new').value = '';
+  document.getElementById('pw-confirm').value = '';
+  const msg = document.getElementById('pw-msg');
+  msg.className = 'pw-msg';
+  document.getElementById('pw-overlay').classList.add('open');
+  setTimeout(()=>document.getElementById('pw-current').focus(), 100);
+}
+function closePwModal(){
+  document.getElementById('pw-overlay').classList.remove('open');
+}
+function showPwMsg(text, type){
+  const el = document.getElementById('pw-msg');
+  el.textContent = text;
+  el.className = 'pw-msg ' + type + ' show';
+}
+async function doChangePw(){
+  const currentPw = document.getElementById('pw-current').value;
+  const newPw = document.getElementById('pw-new').value;
+  const confirmPw = document.getElementById('pw-confirm').value;
+  const btn = document.getElementById('pw-save-btn');
+
+  if(!currentPw){ showPwMsg('현재 비밀번호를 입력하세요.','err'); return; }
+  if(!newPw || newPw.length < 4){ showPwMsg('새 비밀번호는 4자 이상 입력하세요.','err'); return; }
+  if(newPw !== confirmPw){ showPwMsg('새 비밀번호가 일치하지 않습니다.','err'); return; }
+
+  btn.disabled = true;
+  btn.textContent = '변경 중...';
+
+  try{
+    const r = await fetch('/api/auth/change-pw',{
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({currentPw, newPw})
+    });
+    const data = await r.json();
+    if(!r.ok){ showPwMsg(data.error || '변경 실패','err'); return; }
+    showPwMsg('비밀번호가 변경되었습니다!','ok');
+    setTimeout(()=>closePwModal(), 1500);
+  }catch(e){
+    showPwMsg('서버 연결 실패','err');
+  }finally{
+    btn.disabled = false;
+    btn.textContent = '변경';
+  }
+}
+
+/* ── 세션 만료 감지 ─────────────────────────────────────── */
+let _sessionExpired = false;
+function showSessionExpired(){
+  if(_sessionExpired) return;
+  _sessionExpired = true;
+  document.getElementById('session-toast-bg').classList.add('open');
+  document.getElementById('session-toast').style.display = 'block';
+}
+// 주기적 세션 체크 (3분마다)
+setInterval(async ()=>{
+  try{
+    const r = await fetch('/api/auth/me');
+    if(r.status === 401) showSessionExpired();
+  }catch(e){}
+}, 180000);
+// API 호출 시 401 감지를 위한 fetch 래퍼
+const _origFetch = window.fetch;
+window.fetch = async function(...args){
+  const r = await _origFetch.apply(this, args);
+  if(r.status === 401 && !_sessionExpired){
+    const url = typeof args[0] === 'string' ? args[0] : args[0]?.url || '';
+    // 로그인/회원가입 등 인증 전 API는 제외
+    if(url.includes('/api/') && !url.includes('/auth/login') && !url.includes('/auth/register') && !url.includes('/auth/find-id') && !url.includes('/auth/me')){
+      showSessionExpired();
+    }
+  }
+  return r;
+};
 
 let SETS = [];
 let ITEMS = [];
@@ -18,253 +124,11 @@ let SMART_GROUPS = [];
 let PURCHASE_MAP = {};
 let catalogMode = 'normal';
 
-function normRowKeys(row) {
-  const o = {};
-  for (const k of Object.keys(row)) {
-    const key = String(k).trim().toLowerCase();
-    const v = row[k];
-
-    // 한글/영문 헤더를 모두 지원(앱 파서가 기대하는 키로 정규화)
-    if (key === "세트id" || key === "setid" || key === "세트_id" || key === "set_id") {
-      o.set_id = v;
-      o.id = v;
-      continue;
-    }
-    // 단품ID/품목ID 헤더도 앱이 기대하는 `id`로 매핑
-    if (
-      key === "단품id" ||
-      key === "품목id" ||
-      key === "itemid" ||
-      key === "item_id" ||
-      key === "items_id" ||
-      key === "id"
-    ) {
-      o.id = v;
-      continue;
-    }
-    if (key === "세트명" || key === "setname" || key === "ui name" || key === "ui_name" || key === "uiname") {
-      o.name = v;
-      continue;
-    }
-    if (key === "카테고리" || key === "category" || key === "cat") {
-      o.cat = v;
-      continue;
-    }
-    if (key === "품목명" || key === "itemname" || key === "name") {
-      // SetMembers는 n, Items는 name을 기대
-      o.name = v;
-      o.n = v;
-      continue;
-    }
-    if (key === "사양" || key === "spec") {
-      o.spec = v;
-      continue;
-    }
-    if (key === "설명" || key === "desc" || key === "description") {
-      o.desc = v;
-      continue;
-    }
-    if (key === "단위" || key === "unit" || key === "u") {
-      o.u = v;
-      continue;
-    }
-    if (key === "수량" || key === "qty" || key === "quantity" || key === "q") {
-      o.q = v;
-      continue;
-    }
-    if (key === "단가" || key === "price" || key === "p") {
-      o.p = v;
-      continue;
-    }
-    if (key === "비고" || key === "note") {
-      o.note = v;
-      continue;
-    }
-    if (key === "순서" || key === "sort") {
-      o.sort = v;
-      continue;
-    }
-
-    o[key] = v;
-  }
-  return o;
-}
-function cellStr(v) {
-  return String(v == null ? "" : v).replace(/\r\n/g, "\n");
-}
-function cellNum(v) {
-  const n = Number(v);
-  return Number.isFinite(n) ? n : 0;
-}
-
-function catalogFromWorkbook(wb) {
-  const X = typeof XLSX !== "undefined" ? XLSX : null;
-  if (!X || !wb || !wb.Sheets) throw new Error("XLSX 워크북이 없습니다");
-  const S = wb.Sheets;
-  const setsSh = S['세트목록'] || S.Sets;
-  const memSh = S['세트구성'] || S.SetMembers;
-  const itemsSh = S['단품목록'] || S.Items;
-  const notesSh = S['비고기본값'] || S.Notes_Default;
-  if (!setsSh || !memSh || !itemsSh) throw new Error("시트 세트목록, 세트구성, 단품목록 이 필요합니다");
-
-  const setRows = X.utils.sheet_to_json(setsSh, { defval: "" }).map(normRowKeys);
-  const memRows = X.utils.sheet_to_json(memSh, { defval: "" }).map(normRowKeys);
-  const itemRows = X.utils.sheet_to_json(itemsSh, { defval: "" }).map(normRowKeys);
-  const noteRows = notesSh ? X.utils.sheet_to_json(notesSh, { defval: "" }).map(normRowKeys) : [];
-
-  // 단품 ID → 단품 데이터 맵 (세트 멤버에서 단가 참조용)
-  const itemsMap = {};
-  for (const r of itemRows) {
-    const iid = cellStr(r.id).trim();
-    if (iid) itemsMap[iid] = r;
-  }
-
-  const bySet = {};
-  for (const r of memRows) {
-    const sid = cellStr(r.set_id).trim();
-    if (!sid) continue;
-    const sort = cellNum(r.sort);
-    const note = cellStr(r.note).trim();
-
-    // 단품ID가 있으면 Items 시트에서 이름/단가/사양 자동 참조
-    const linkedId = cellStr(r.id).trim();
-    const linked = linkedId ? itemsMap[linkedId] : null;
-
-    const linkedNote = linked ? cellStr(linked.note).trim() : "";
-    const m = {
-      itemId: linkedId,
-      n:    linked ? cellStr(linked.name) : cellStr(r.n),
-      spec: linked ? cellStr(linked.spec) : cellStr(r.spec),
-      u:    cellStr(r.u) || (linked ? cellStr(linked.u) : "") || "EA",
-      q:    cellNum(r.q) || 0,
-      p:    linked ? cellNum(linked.p) : cellNum(r.p),
-      cat:  linked ? cellStr(linked.cat) : cellStr(r.cat),
-    };
-    const resolvedNote = note || linkedNote;
-    if (resolvedNote) m.note = resolvedNote;
-    (bySet[sid] = bySet[sid] || []).push({ sort, m });
-  }
-  for (const k of Object.keys(bySet)) {
-    bySet[k].sort((a, b) => a.sort - b.sort);
-    bySet[k] = bySet[k].map((x) => x.m);
-  }
-
-  const sets = setRows
-    .filter((r) => cellStr(r.id).trim())
-    .map((r) => {
-      const id = cellStr(r.id).trim();
-      return {
-        id,
-        name: cellStr(r.name),
-        members: bySet[id] || [],
-      };
-    });
-
-  const items = itemRows
-    .filter((r) => cellStr(r.id).trim())
-    .map((r) => {
-      const it = {
-        id: cellStr(r.id).trim(),
-        cat: cellStr(r.cat),
-        name: cellStr(r.name),
-        spec: cellStr(r.spec),
-        u: cellStr(r.u) || "EA",
-        p: cellNum(r.p) || 0,
-      };
-      const note = cellStr(r.note).trim();
-      if (note) it.note = note;
-      return it;
-    });
-
-  let notesDefault = noteRows
-    .map((r) => cellStr(r.text).trim() || cellStr(r.Text).trim())
-    .filter(Boolean);
-  if (!notesDefault.length) {
-    for (const r of noteRows) {
-      const vals = Object.values(r).filter((v) => v != null && String(v).trim() !== "");
-      if (vals.length) notesDefault.push(cellStr(vals[0]));
-    }
-    notesDefault = notesDefault.filter(Boolean);
-  }
-
-  // SmartGroups / SmartItems 파싱
-  const sgSh = S['스마트그룹'] || S.SmartGroups;
-  const siSh = S['스마트항목'] || S.SmartItems;
-  let smartGroups = [];
-  if (sgSh && siSh) {
-    const sgRows = X.utils.sheet_to_json(sgSh, {defval:''}).map(r => {
-      const o = {};
-      for (const k of Object.keys(r)) {
-        const key = String(k).trim().toLowerCase();
-        const v = r[k];
-        if (key === 'group_id' || key === '그룹id' || key === '그룹_id')   { o.id  = v; continue; }
-        if (key === 'group_name' || key === '그룹명') { o.name = v; continue; }
-        if (key === 'cat' || key === '카테고리') { o.cat = v; continue; }
-        if (key === 'sort' || key === '순서')    { o.sort = cellNum(v); continue; }
-        o[key] = v;
-      }
-      return o;
-    });
-    const siRows = X.utils.sheet_to_json(siSh, {defval:''}).map(r => {
-      const o = {};
-      for (const k of Object.keys(r)) {
-        const key = String(k).trim().toLowerCase();
-        const v = r[k];
-        if (key === 'group_id' || key === '그룹id' || key === '그룹_id')   { o.group_id = v; continue; }
-        if (key === '설명' || key === 'description') { o.desc = v; continue; }
-        if (key === 'items_id' || key === 'item_id' || key === '품목id' || key === '품목_id') { o.item_id = v; continue; }
-        if (key === '소분류' || key === 'sub_cat' || key === 'subcat' || key === 'sub_group') { o.cat = cellStr(v).trim(); continue; }
-        if (key === 'name' || key === '품목명')       { o.name = v; continue; }
-        if (key === '규격' || key === 'spec')    { o.spec = v; continue; }
-        if (key === '단위' || key === 'unit')    { o.unit = cellStr(v).trim(); continue; }
-        if (key === '수량' || key === 'quantity' || key === 'qty') { o.qty = cellNum(v); continue; }
-        if (key === '가격' || key === 'price' || key === '단가')   { o.price = cellNum(v); continue; }
-        if (key === '비고' || key === 'note')    { o.note = v; continue; }
-        o[key] = v;
-      }
-      return o;
-    });
-    const byGroup = {};
-    for (const it of siRows) {
-      const gid = cellStr(it.group_id).trim();
-      if (!gid) continue;
-      (byGroup[gid] = byGroup[gid] || []).push(it);
-    }
-    smartGroups = sgRows
-      .filter(r => cellStr(r.id).trim())
-      .sort((a, b) => (a.sort||0) - (b.sort||0))
-      .map(r => {
-        const gid = cellStr(r.id).trim();
-        const items = byGroup[gid] || [];
-        const totalPrice = items.reduce((s, it) => s + (it.price||0) * Math.max(it.qty||1, 1), 0);
-        return { id: gid, name: cellStr(r.name), cat: cellStr(r.cat), sort: r.sort||0, items, totalPrice };
-      });
-  }
-
-  // 구매요청 시트 파싱
-  const prSh = S['구매요청'] || S.PurchaseRequest;
-  let purchaseMap = {};
-  if (prSh) {
-    const prRows = X.utils.sheet_to_json(prSh, { defval: '' }).map(normRowKeys);
-    for (const r of prRows) {
-      const pid = cellStr(r.id || r['품목id']).trim();
-      if (!pid) continue;
-      purchaseMap[pid] = {
-        name: cellStr(r['구매품목명'] || r.name).trim(),
-        supplier: cellStr(r['기본구매처'] || r.supplier || r['구매처']).trim(),
-        note: cellStr(r.note || r['비고']).trim(),
-      };
-    }
-  }
-
-  return { SETS: sets, ITEMS: items, NOTES_DEFAULT: notesDefault, SMART_GROUPS: smartGroups, PURCHASE_MAP: purchaseMap };
-}
-
 function showCatalogErr(msg) {
   const html =
     '<div class="catalog-err"><strong>카탈로그를 불러올 수 없습니다.</strong><br><span style="font-size:11px;color:var(--mist)">' +
     String(msg) +
-    "</span><br><span style=\"font-size:10px;color:var(--mist2)\">로컬 HTTP 서버로 열어 주세요(file:// 에서는 fetch 가 막힐 수 있습니다). `data/catalog.xlsx` 경로와 헤더를 확인하세요.</span></div>";
+    "</span></div>";
   const sg = document.getElementById("set-grid");
   const ig = document.getElementById("item-grid");
   if (sg) sg.innerHTML = html;
@@ -288,34 +152,22 @@ async function loadCatalog() {
   if (sg) sg.innerHTML = loading;
   if (ig) ig.innerHTML = loading;
 
-  let data = null;
   try {
-    const xRes = await fetch(CATALOG_XLSX, { cache: "no-store" });
-    if (!xRes.ok) throw new Error("HTTP " + xRes.status + " (" + CATALOG_XLSX + ")");
-    if (typeof XLSX === "undefined") throw new Error("XLSX 라이브러리가 로드되지 않았습니다");
-    const buf = await xRes.arrayBuffer();
-    const wb = XLSX.read(buf, { type: "array" });
-    data = catalogFromWorkbook(wb);
+    const res = await fetch('/api/catalog', { cache: 'no-store' });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    SETS = data.SETS || [];
+    ITEMS = data.ITEMS || [];
+    NOTES_DEFAULT = data.NOTES_DEFAULT || [];
+    SMART_GROUPS = data.SMART_GROUPS || [];
+    PURCHASE_MAP = data.PURCHASE_MAP || {};
+    if (!SETS.length && !ITEMS.length) {
+      showCatalogErr("세트/단품 데이터가 비어 있습니다.");
+    }
   } catch (e) {
     console.error(e);
     showCatalogErr(e.message || e);
-    SETS = [];
-    ITEMS = [];
-    NOTES_DEFAULT = [];
-    initAfterCatalog();
-    return;
-  }
-
-  SETS = data.SETS || [];
-  ITEMS = data.ITEMS || [];
-  NOTES_DEFAULT = data.NOTES_DEFAULT || [];
-  SMART_GROUPS = data.SMART_GROUPS || [];
-  PURCHASE_MAP = data.PURCHASE_MAP || {};
-  if (!SETS.length && !ITEMS.length) {
-    showCatalogErr("세트/단품 데이터가 비어 있습니다.");
-    SETS = [];
-    ITEMS = [];
-    NOTES_DEFAULT = [];
+    SETS = []; ITEMS = []; NOTES_DEFAULT = [];
   }
   initAfterCatalog();
 }
@@ -402,6 +254,15 @@ function adj(id,d,e){
   else c.qty=Math.max(1,(c.qty||1)+d);
   renderCart();
 }
+function setQty(id,val,e){
+  stop(e);
+  if(!cart[id])return;
+  const n=Math.max(1,parseInt(val)||1);
+  const c=cart[id];
+  if(c.type==='set')c.mult=n;
+  else c.qty=n;
+  recalcTotals();
+}
 
 function onItemPriceChange(id,val){
   if(!cart[id])return;
@@ -422,6 +283,13 @@ function adjMember(setId,idx,d,e){
   if(!c)return;
   c.members[idx].q=Math.max(1,(c.members[idx].q||1)+d);
   renderCart();
+}
+function setMemberQty(setId,idx,val,e){
+  stop(e);
+  const c=cart[setId];
+  if(!c)return;
+  c.members[idx].q=Math.max(1,parseInt(val)||1);
+  recalcTotals();
 }
 function rmMember(setId,idx,e){
   stop(e);
@@ -468,16 +336,15 @@ function cartSupply(){
 function renderCart(){
   const scroll=document.getElementById('cart-scroll');
   const ids=Object.keys(cart);
-  const saveBtn=document.getElementById('save-btn');
   if(!ids.length){
     scroll.innerHTML=`<div class="cart-empty"><svg viewBox="0 0 44 44"><rect x="4" y="12" width="36" height="26" rx="3"/><path d="M14 12V8a8 8 0 0116 0v4"/><circle cx="16" cy="25" r="2"/><circle cx="28" cy="25" r="2"/></svg><p>세트 패키지 또는 단품을<br>선택하면 여기에 담깁니다<br><br><span style="font-family:var(--mono);font-size:9px;color:var(--mist2)">단가는 직접 수정 가능합니다</span></p></div>`;
     ['t-supply','t-vat','t-total'].forEach(id=>document.getElementById(id).textContent='—');
     document.getElementById('rp-meta').textContent='항목을 선택하세요';
-    saveBtn.disabled=true;
     const excelBtnE=document.getElementById('excel-btn');if(excelBtnE)excelBtnE.disabled=true;
     const pvBtnE=document.getElementById('preview-btn');if(pvBtnE)pvBtnE.disabled=true;
     const prBtnE=document.getElementById('purchase-btn');if(prBtnE)prBtnE.disabled=true;
     const mkRowE=document.getElementById('markup-row');if(mkRowE)mkRowE.style.display='none';
+    const ssBtn=document.getElementById('rp-save-set');if(ssBtn)ssBtn.style.display='none';
     return;
   }
   let html='';
@@ -496,10 +363,8 @@ function renderCart(){
           </div>
           <div style="display:flex;align-items:center;gap:6px;justify-content:space-between">
             <div class="ci-stepper" style="margin:0;gap:4px">
-              <span class="ci-slbl">수량</span>
-              <button class="sbtn" onclick="adjMember('${id}',${i},-1,event)">−</button>
-              <span class="sval">×${m.q}</span>
-              <button class="sbtn" onclick="adjMember('${id}',${i},1,event)">+</button>
+              <span class="ci-slbl">${m.cat==='회선관리'?'개월':'수량'}</span>
+              <input type="number" class="qty-in" value="${m.q}" min="1" onchange="setMemberQty('${id}',${i},this.value,event)" onclick="event.stopPropagation()" onfocus="this.select()">
             </div>
             <span class="cim-q">${N(la)} 원</span>
           </div>
@@ -513,7 +378,7 @@ function renderCart(){
       html+=`<div class="ci ci-set" data-setid="${id}" ondragover="onCartSetDragOver(event)" ondragleave="onCartSetDragLeave(event)">
         <div class="ci-top"><div class="ci-name">${c.name}</div><button class="ci-rm" onclick="rmCart('${id}')">×</button></div>
         <div class="ci-row"><span class="ci-tag">세트</span><span style="font-family:var(--mono);font-size:12px;color:var(--ice)">${N(totalLine)} 원</span></div>
-        <div class="ci-stepper"><span class="ci-slbl">배수</span><button class="sbtn" onclick="adj('${id}',-1,event)">−</button><span class="sval">×${mult}</span><button class="sbtn" onclick="adj('${id}',1,event)">+</button></div>
+        <div class="ci-stepper"><span class="ci-slbl">배수</span><input type="number" class="qty-in" value="${mult}" min="1" onchange="setQty('${id}',this.value,event)" onclick="event.stopPropagation()" onfocus="this.select()"></div>
         <div class="ci-drop-hint">단품을 여기에 드롭</div>
         <div class="ci-members" style="margin-top:8px;padding-top:8px;border-top:1px solid var(--wire)">${memRows}</div>
       </div>`;
@@ -530,13 +395,12 @@ function renderCart(){
         <div class="ci-top"><div class="ci-name">${c.name}${c.note?` <span style="font-size:10px;color:var(--amber)">(${c.note})</span>`:''}</div><button class="ci-rm" onclick="rmCart('${id}')">×</button></div>
         <div class="ci-row"><span class="ci-tag item">단품</span><span style="font-family:var(--mono);font-size:12px;color:var(--ice)">${N(la)} 원</span></div>
         <div class="ci-price-row"><span class="ci-price-lbl">단가 수정</span><input class="ci-price-in" value="${N(ep)}" onchange="onItemPriceChange('${id}',this.value);formatPriceInput(this)" oninput="onItemPriceChange('${id}',this.value)" onfocus="this.select()" onclick="event.stopPropagation()"><span class="ci-price-unit">원</span></div>
-        <div class="ci-stepper"><span class="ci-slbl">수량</span><button class="sbtn" onclick="adj('${id}',-1,event)">−</button><span class="sval">×${mult}</span><button class="sbtn" onclick="adj('${id}',1,event)">+</button></div>
+        <div class="ci-stepper"><span class="ci-slbl">${c.cat==='회선관리'?'개월':'수량'}</span><input type="number" class="qty-in" value="${mult}" min="1" onchange="setQty('${id}',this.value,event)" onclick="event.stopPropagation()" onfocus="this.select()"></div>
       </div>`;
     }
   }
   scroll.innerHTML=html;
   recalcTotals();
-  saveBtn.disabled=false;
   const excelBtn=document.getElementById('excel-btn');
   if(excelBtn)excelBtn.disabled=false;
   const pvBtn=document.getElementById('preview-btn');
@@ -545,6 +409,8 @@ function renderCart(){
   if(prBtn)prBtn.disabled=false;
   const mkRow=document.getElementById('markup-row');
   if(mkRow)mkRow.style.display='';
+  const ssBtn=document.getElementById('rp-save-set');
+  if(ssBtn)ssBtn.style.display='';
 }
 
 function recalcTotals(){
@@ -675,7 +541,8 @@ function onMemberRowDragLeave(e){
 }
 
 
-function saveQuote(){
+function autoSaveQuote(action){
+  if(!Object.keys(cart).length) return;
   const company=document.getElementById('f-company').value||'';
   const siteName=document.getElementById('f-sitename').value||'';
   const client=[company,siteName].filter(Boolean).join(' ')||'(미입력)';
@@ -691,19 +558,18 @@ function saveQuote(){
       return{type:'set',name:c.name,cat:c.cat,mult:c.mult||1,
         members:c.members.map((m,i)=>({...m,effectiveP:effectiveMemberPrice(c,i)}))};
     }else{
-      return{type:'item',name:c.name,cat:c.cat,qty:c.qty||1,
-        effectiveP:effectiveItemPrice(c),unit:c.unit||'식',note:c.note||''};
+      return{type:'item',itemId:id,name:c.name,cat:c.cat,qty:c.qty||1,
+        effectiveP:effectiveItemPrice(c),unit:c.unit||'식',spec:c.spec||'',note:c.note||''};
     }
   });
   const h=loadHistory();
   h.unshift({id:'q'+Date.now(),client,company,siteName,site,manager,contact,date,valid,notes,
     supply,vat:supply*.1,total:supply*1.1,status:'review',items:snapshot,
-    template:selectedTemplate,
+    template:selectedTemplate,action:action||'',
     createdAt:new Date().toISOString()});
   saveHistory(h);updateHistCount();
-  const btn=document.getElementById('save-btn');
-  btn.textContent='✓ 저장 완료';btn.style.borderColor='var(--sigbdr)';btn.style.color='var(--sig)';
-  setTimeout(()=>{btn.textContent='이력에 저장';btn.style.borderColor='';btn.style.color='';},1800);
+  const note=document.getElementById('autosave-note');
+  if(note){note.textContent='자동 저장됨 · '+new Date().toLocaleTimeString('ko-KR');setTimeout(()=>{note.textContent='';},3000);}
 }
 
 function updateHistCount(){
@@ -718,28 +584,34 @@ function filterHist(f,btn){
   renderHistory();
 }
 
+let _selectedIds=new Set();
+
 function renderHistory(){
   const h=loadHistory();
   const filtered=histFilter==='all'?h:h.filter(q=>q.status===histFilter);
   const body=document.getElementById('hist-body');
+  // 필터 바뀌면 선택 초기화
+  _selectedIds.clear();
+  updateBatchBar();
   if(!filtered.length){
     body.innerHTML=`<div class="hist-empty"><svg viewBox="0 0 48 48"><rect x="8" y="8" width="32" height="36" rx="3"/><line x1="16" y1="18" x2="32" y2="18"/><line x1="16" y1="24" x2="32" y2="24"/><line x1="16" y1="30" x2="24" y2="30"/></svg><p>${histFilter==='all'?'저장된 견적이 없습니다':'해당 상태의 견적이 없습니다'}</p></div>`;
     return;
   }
-  let html=`<table class="hist-tbl"><thead><tr><th style="width:200px">거래처 / 현장</th><th>합계 금액</th><th>견적일</th><th style="width:100px">상태</th><th style="width:160px"></th></tr></thead><tbody>`;
+  let html=`<div class="hist-wrap"><table class="hist-tbl"><thead><tr><th class="chk-col"><input type="checkbox" class="hist-chk" id="chk-all" onclick="toggleSelectAll(this)"></th><th>거래처 / 현장</th><th style="width:180px;text-align:center">합계 금액</th><th style="width:130px;text-align:center">견적일</th><th style="width:80px;text-align:center">상태</th><th style="width:220px;text-align:center">관리</th></tr></thead><tbody>`;
   filtered.forEach(q=>{
     const sc=STATUS_CFG[q.status]||STATUS_CFG.review;
-    html+=`<tr id="hr-${q.id}">
-      <td><div class="hist-client">${q.client}</div><div class="hist-site">${q.site}</div></td>
-      <td><div class="hist-amt">${NW(q.total)}</div><div style="font-family:var(--mono);font-size:9px;color:var(--mist);margin-top:2px">공급가 ${NW(q.supply)}</div></td>
-      <td><div class="hist-date">${q.date}</div><div style="font-family:var(--mono);font-size:9px;color:var(--mist2);margin-top:2px">${q.manager||''}</div></td>
-      <td><div class="st-wrap" id="stw-${q.id}">
+    html+=`<tr id="hr-${q.id}" class="hist-row" onclick="onHistRowClick(event,'${q.id}')">
+      <td class="chk-col"><input type="checkbox" class="hist-chk" data-id="${q.id}" onclick="onRowCheck(event,'${q.id}')"></td>
+      <td><div class="hist-client">${q.client}</div><div class="hist-site">${q.site}</div><div class="hist-meta">${q.items?q.items.length+'개 품목':''}${q.notes&&q.notes.length?'<span class="hist-note-badge">특기사항 '+q.notes.length+'건</span>':''}</div></td>
+      <td style="text-align:center"><div class="hist-amt">${NW(q.total)}</div><div style="font-family:var(--mono);font-size:11px;color:var(--mist);margin-top:2px">공급가 ${NW(q.supply)}</div></td>
+      <td style="text-align:center"><div class="hist-date">${q.date}</div>${q.manager?`<div style="font-size:12px;color:var(--text2);margin-top:2px">${q.manager}</div>`:''}</td>
+      <td style="text-align:center"><div class="st-wrap" id="stw-${q.id}">
         <span class="status-badge ${sc.cls}" onclick="toggleStDrop('${q.id}')">${sc.label}</span>
         <div class="st-drop">${Object.entries(STATUS_CFG).map(([k,v])=>`<div class="st-opt" onclick="changeStatus('${q.id}','${k}')"><div class="st-dot" style="background:${v.dot}"></div><span style="font-size:11px;color:var(--ice)">${v.label}</span></div>`).join('')}</div>
       </div></td>
-      <td><div class="hist-actions"><button class="a-btn" onclick="toggleDetail('${q.id}')">상세</button><button class="a-btn" onclick="downloadFromHist('${q.id}')">다운로드</button><button class="a-btn pr" onclick="openPurchaseFromHist('${q.id}')">구매요청</button><button class="a-btn del" onclick="deleteQuote('${q.id}')">삭제</button></div></td>
+      <td><div class="hist-actions"><button class="a-btn" onclick="downloadFromHist('${q.id}')">다운로드</button><button class="a-btn pr" onclick="openPurchaseFromHist('${q.id}')">구매요청</button><button class="a-btn del" onclick="deleteQuote('${q.id}')">삭제</button></div></td>
     </tr>
-    <tr><td colspan="5" style="padding:0"><div class="hist-detail" id="hd-${q.id}">
+    <tr><td colspan="6" style="padding:0"><div class="hist-detail" id="hd-${q.id}">
       <div class="hd-title">견적 구성 품목</div>
       ${q.items.map(it=>{
         if(it.type==='set'){
@@ -752,16 +624,106 @@ function renderHistory(){
       }).join('')}
     </div></td></tr>`;
   });
-  html+='</tbody></table>';
+  html+='</tbody></table></div>';
   body.innerHTML=html;
   document.addEventListener('click',closeAllDrops,{once:true});
 }
 
+/* ── 체크박스 & 일괄삭제 ── */
+function onRowCheck(e,id){
+  e.stopPropagation();
+  if(e.target.checked) _selectedIds.add(id);
+  else _selectedIds.delete(id);
+  syncRowCheckState(id);
+  syncSelectAll();
+  updateBatchBar();
+}
+
+function toggleSelectAll(el){
+  const boxes=document.querySelectorAll('.hist-chk[data-id]');
+  boxes.forEach(cb=>{
+    cb.checked=el.checked;
+    const id=cb.dataset.id;
+    if(el.checked) _selectedIds.add(id);
+    else _selectedIds.delete(id);
+    syncRowCheckState(id);
+  });
+  updateBatchBar();
+}
+
+function syncSelectAll(){
+  const boxes=document.querySelectorAll('.hist-chk[data-id]');
+  const all=document.getElementById('chk-all');
+  if(!all||!boxes.length) return;
+  const checkedCount=[...boxes].filter(cb=>cb.checked).length;
+  all.checked=checkedCount===boxes.length;
+  all.indeterminate=checkedCount>0&&checkedCount<boxes.length;
+}
+
+function syncRowCheckState(id){
+  const row=document.getElementById('hr-'+id);
+  if(row) row.classList.toggle('checked',_selectedIds.has(id));
+}
+
+function updateBatchBar(){
+  const bar=document.getElementById('batch-bar');
+  const cnt=document.getElementById('batch-count');
+  if(_selectedIds.size>0){
+    bar.classList.add('show');
+    cnt.textContent=_selectedIds.size;
+  }else{
+    bar.classList.remove('show');
+  }
+}
+
+function clearSelection(){
+  _selectedIds.clear();
+  document.querySelectorAll('.hist-chk').forEach(cb=>cb.checked=false);
+  document.querySelectorAll('.hist-row.checked').forEach(r=>r.classList.remove('checked'));
+  updateBatchBar();
+}
+
+function batchDelete(){
+  if(!_selectedIds.size) return;
+  document.getElementById('del-confirm-name').textContent=_selectedIds.size+'건의 견적';
+  _deleteTargetId='__batch__';
+  document.getElementById('del-confirm-overlay').classList.add('open');
+}
+
+function onHistRowClick(e,id){
+  // 체크박스, 버튼, 상태뱃지, 드롭다운 클릭은 무시
+  if(e.target.closest('.hist-chk,.a-btn,.status-badge,.st-drop')) return;
+  toggleDetail(id);
+}
 function toggleDetail(id){document.getElementById('hd-'+id).classList.toggle('open')}
 function toggleStDrop(id){const w=document.getElementById('stw-'+id);const was=w.classList.contains('open');closeAllDrops();if(!was)w.classList.add('open');}
 function closeAllDrops(){document.querySelectorAll('.st-wrap.open').forEach(w=>w.classList.remove('open'))}
 function changeStatus(id,status){const h=loadHistory();const q=h.find(x=>x.id===id);if(q){q.status=status;saveHistory(h);}closeAllDrops();renderHistory();}
-function deleteQuote(id){if(!confirm('이 견적 이력을 삭제할까요?'))return;saveHistory(loadHistory().filter(x=>x.id!==id));updateHistCount();renderHistory();}
+let _deleteTargetId=null;
+function deleteQuote(id){
+  _deleteTargetId=id;
+  const h=loadHistory();
+  const q=h.find(x=>x.id===id);
+  const name=q?(q.client||''):'';
+  document.getElementById('del-confirm-name').textContent=name||'이 견적';
+  document.getElementById('del-confirm-overlay').classList.add('open');
+}
+function closeDeleteConfirm(){
+  document.getElementById('del-confirm-overlay').classList.remove('open');
+  _deleteTargetId=null;
+}
+function confirmDelete(){
+  if(!_deleteTargetId) return;
+  if(_deleteTargetId==='__batch__'){
+    // 일괄삭제
+    saveHistory(loadHistory().filter(x=>!_selectedIds.has(x.id)));
+    _selectedIds.clear();
+  }else{
+    saveHistory(loadHistory().filter(x=>x.id!==_deleteTargetId));
+  }
+  updateHistCount();renderHistory();
+  closeDeleteConfirm();
+}
 /* ── 특기사항 동적 리스트 ────────────────────────────────────────── */
 function addNote(value=''){
   const li=document.createElement('div');
@@ -806,27 +768,28 @@ function _buildPayload(src){
       const raw=Object.entries(cart).map(([id,c])=>{
         if(c.type==='set'){
           const mult=c.mult||1;
+          const grp=c.name||'';
           return c.members.map((m,i)=>({type:'item',itemId:m.itemId||'',name:m.n||'',cat:m.cat||'',
-            qty:(m.q||1)*mult,effectiveP:effectiveMemberPrice(c,i),
+            group:grp,qty:(m.q||1)*mult,effectiveP:effectiveMemberPrice(c,i),
             unit:m.u||'EA',spec:m.spec||'',note:m.note||''}));
         }
         if(c.type==='smart_group') return{type:'smart_group',name:c.name,cat:c.cat,
-          items:c.items.map(it=>({...it})),totalPrice:c.totalPrice||0};
-        return{type:'item',itemId:id,name:c.name,cat:c.cat,qty:c.qty||1,
+          group:c.name||c.cat||'',items:c.items.map(it=>({...it})),totalPrice:c.totalPrice||0};
+        return{type:'item',itemId:id,name:c.name,cat:c.cat,group:c.cat||'',qty:c.qty||1,
           effectiveP:effectiveItemPrice(c),unit:c.unit||'식',spec:c.spec||'',note:c.note||''};
       }).flat();
       const merged=[];
       for(const it of raw){
         if(it.type!=='item'||!it.itemId){merged.push(it);continue;}
-        const dup=merged.find(x=>x.type==='item'&&x.itemId===it.itemId&&x.cat===it.cat);
+        const dup=merged.find(x=>x.type==='item'&&x.itemId===it.itemId&&x.group===it.group);
         if(dup){
           dup.qty+=it.qty;
           if(it.effectiveP>dup.effectiveP) dup.effectiveP=it.effectiveP;
         }else merged.push(it);
       }
       merged.sort((a,b)=>{
-        const ca=a.cat||''; const cb=b.cat||'';
-        return ca<cb?-1:ca>cb?1:0;
+        const ga=a.group||a.cat||''; const gb=b.group||b.cat||'';
+        return ga<gb?-1:ga>gb?1:0;
       });
       return merged;
     })()
@@ -856,8 +819,17 @@ function renderCatTabs(){
   <button class="ct" onclick="switchTab('items',this)">단품 선택</button>`;
 }
 
+function filterSets(){renderSets();}
+
 function renderSets(){
-  document.getElementById('set-grid').innerHTML=SETS.map(s=>{
+  const q=(document.getElementById('set-q')?.value||'').toLowerCase();
+  const list=SETS.filter(s=>{
+    if(!q) return true;
+    if(s.name.toLowerCase().includes(q)) return true;
+    if(s.members.some(m=>m.n.toLowerCase().includes(q)||(m.cat||'').toLowerCase().includes(q))) return true;
+    return false;
+  });
+  document.getElementById('set-grid').innerHTML=list.map(s=>{
     const tot=s.members.reduce((a,m)=>a+m.p*m.q,0);
     const mems=s.members.map(m=>`<div class="pm-row"><span class="pm-n">${m.n}</span><span class="pm-q">×${m.q}</span></div>`).join('');
     const cats=[...new Set(s.members.map(m=>m.cat).filter(Boolean))];
@@ -869,9 +841,7 @@ function renderSets(){
       <div class="pc-foot"><span class="pc-badge">${s.members.length}개 품목</span><span class="pc-price">${tot>0?N(tot)+' 원':'별도협의'}</span></div>
       <div class="pc-stepper" onclick="event.stopPropagation()">
         <span class="stlbl">배수</span>
-        <button class="sbtn" onclick="adj('${s.id}',-1,event)">−</button>
-        <span class="sval">×1</span>
-        <button class="sbtn" onclick="adj('${s.id}',1,event)">+</button>
+        <input type="number" class="qty-in" value="${cart[s.id]?.mult||1}" min="1" onchange="setQty('${s.id}',this.value,event)" onfocus="this.select()">
       </div>
       <div class="pc-mems">${mems}</div>
     </div>`;
@@ -934,7 +904,7 @@ function toggleSmartGroup(id, e) {
 function filterItems(){
   const q=document.getElementById('item-q').value.toLowerCase();
   const cat=document.getElementById('item-cat').value;
-  const list=ITEMS.filter(i=>(!q||i.name.toLowerCase().includes(q)||i.spec.toLowerCase().includes(q))&&(!cat||i.cat===cat));
+  const list=ITEMS.filter(i=>(!q||i.name.toLowerCase().includes(q)||i.spec.toLowerCase().includes(q)||i.cat.toLowerCase().includes(q))&&(!cat||i.cat===cat));
   document.getElementById('item-grid').innerHTML=list.map(i=>{
     const sel=cart[i.id]?'sel':'';
     return`<div class="pc ${sel}" id="pc-${i.id}" onclick="toggleItem('${i.id}',event)" draggable="true" ondragstart="onCatalogDragStart(event,'item','${i.id}')" ondragend="onCatalogDragEnd(event)">
@@ -943,13 +913,57 @@ function filterItems(){
       <div class="pc-name">${i.name}</div>
       <div class="pc-foot"><span class="pc-price">${i.p>0?N(i.p)+' 원':'별도협의'}</span><span class="pc-badge item">단품</span></div>
       <div class="pc-stepper" onclick="event.stopPropagation()">
-        <span class="stlbl">수량</span>
-        <button class="sbtn" onclick="adj('${i.id}',-1,event)">−</button>
-        <span class="sval">${cart[i.id]?.qty||1}</span>
-        <button class="sbtn" onclick="adj('${i.id}',1,event)">+</button>
+        <span class="stlbl">${i.cat==='회선관리'?'개월':'수량'}</span>
+        <input type="number" class="qty-in" value="${cart[i.id]?.qty||1}" min="1" onchange="setQty('${i.id}',this.value,event)" onfocus="this.select()">
       </div>
     </div>`;
   }).join('');
+}
+
+/* ── 카트 → 세트 저장 ──────────────────────────────────────────── */
+function openSaveSetUI(){
+  const bar=document.getElementById('save-set-bar');
+  bar.classList.add('open');
+  const inp=document.getElementById('save-set-name');
+  inp.value='';inp.focus();
+}
+function closeSaveSetUI(){
+  document.getElementById('save-set-bar').classList.remove('open');
+}
+function cartToMembers(){
+  const members=[];
+  for(const[id,c]of Object.entries(cart)){
+    if(c.type==='set'){
+      const mult=c.mult||1;
+      c.members.forEach(m=>{
+        const existing=members.find(x=>x.itemId===m.itemId);
+        if(existing){existing.q+=m.q*mult;}
+        else members.push({itemId:m.itemId,q:m.q*mult,sort:members.length,note:m.note||''});
+      });
+    }else if(c.type==='item'){
+      const existing=members.find(x=>x.itemId===id);
+      if(existing){existing.q+=c.qty||1;}
+      else members.push({itemId:id,q:c.qty||1,sort:members.length,note:c.note||''});
+    }
+  }
+  return members;
+}
+async function confirmSaveSet(){
+  const name=document.getElementById('save-set-name').value.trim();
+  if(!name) return alert('세트 이름을 입력하세요.');
+  const members=cartToMembers();
+  if(!members.length) return alert('저장할 품목이 없습니다.');
+  try{
+    const resp=await fetch('/api/catalog/sets',{
+      method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({name,members})
+    });
+    if(!resp.ok){const e=await resp.json().catch(()=>({error:'서버 오류'}));throw new Error(e.error);}
+    closeSaveSetUI();
+    await loadCatalog();
+    const note=document.getElementById('autosave-note');
+    if(note){note.textContent='세트 "'+name+'" 저장 완료';setTimeout(()=>{note.textContent='';},3000);}
+  }catch(e){alert('세트 저장 오류: '+e.message);}
 }
 
 loadCatalog();
@@ -999,6 +1013,7 @@ async function generateExcel(){
     const cmpSuffix=(p.template&&p.template.includes('비교'))?'_비교견적':'';
     a.href=url;a.download=`${p.client}_${p.site}_${ds}${cmpSuffix}.xlsx`;
     document.body.appendChild(a);a.click();document.body.removeChild(a);URL.revokeObjectURL(url);
+    autoSaveQuote('엑셀 다운로드');
     btn.textContent='✓ 완료';btn.style.borderColor='var(--sigbdr)';btn.style.color='var(--sig)';
     setTimeout(()=>{btn.textContent=orig;btn.style.borderColor='';btn.style.color='';btn.disabled=false;},2000);
   }catch(e){
@@ -1022,6 +1037,7 @@ async function previewExcel(){
     });
     if(!resp.ok){const e=await resp.json().catch(()=>({error:'서버 오류'}));throw new Error(e.error);}
     previewSheets=await resp.json();
+    autoSaveQuote('미리보기');
     openPreview(0);
   }catch(e){
     alert('미리보기 오류: '+e.message);
@@ -1135,6 +1151,106 @@ function escHtml(s){
   return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br>');
 }
 
+/* ────────────────────────────────────────────────
+   미리보기 → PDF / 이미지 내보내기
+──────────────────────────────────────────────── */
+function _getPreviewFileName(){
+  const company=document.getElementById('f-company').value||'';
+  const siteName=document.getElementById('f-sitename').value||'';
+  const client=[company,siteName].filter(Boolean).join(' ')||'견적서';
+  const ds=(document.getElementById('f-date').value||'').replace(/-/g,'').slice(2);
+  return `${client}_미리보기_${ds}`;
+}
+
+async function _captureAllSheets(){
+  if(!previewSheets||!previewSheets.length) return [];
+  const body=document.getElementById('pv-body');
+  const currentIdx=[...document.querySelectorAll('.pv-tab')].findIndex(t=>t.classList.contains('on'));
+  const canvases=[];
+  for(let i=0;i<previewSheets.length;i++){
+    renderSheet(previewSheets[i], body);
+    const wrap=body.querySelector('.pv-sheet-wrap');
+    if(!wrap) continue;
+    const canvas=await html2canvas(wrap,{
+      scale:2,
+      useCORS:true,
+      backgroundColor:'#ffffff',
+      logging:false,
+    });
+    canvases.push({canvas, name:previewSheets[i].name});
+  }
+  if(currentIdx>=0) renderSheet(previewSheets[currentIdx], body);
+  return canvases;
+}
+
+async function exportPreviewPDF(){
+  const btn=document.querySelector('.pv-export-btn');
+  const origText=btn.innerHTML;
+  btn.disabled=true;btn.innerHTML='생성 중…';
+  try{
+    const sheets=await _captureAllSheets();
+    if(!sheets.length) return;
+    const {jsPDF}=window.jspdf;
+    const A4_W=210, A4_H=297, MARGIN=10;
+    const contentW=A4_W-MARGIN*2;
+    const pdf=new jsPDF('p','mm','a4');
+    sheets.forEach((sh,i)=>{
+      if(i>0) pdf.addPage();
+      const ratio=sh.canvas.height/sh.canvas.width;
+      const imgW=contentW;
+      const imgH=contentW*ratio;
+      const imgData=sh.canvas.toDataURL('image/png');
+      if(imgH<=A4_H-MARGIN*2){
+        pdf.addImage(imgData,'PNG',MARGIN,MARGIN,imgW,imgH);
+      }else{
+        const pageContentH=A4_H-MARGIN*2;
+        const srcPageH=Math.floor(sh.canvas.width*(pageContentH/contentW));
+        const totalPages=Math.ceil(sh.canvas.height/srcPageH);
+        for(let p=0;p<totalPages;p++){
+          if(p>0) pdf.addPage();
+          const sliceCanvas=document.createElement('canvas');
+          sliceCanvas.width=sh.canvas.width;
+          const sliceH=Math.min(srcPageH, sh.canvas.height-p*srcPageH);
+          sliceCanvas.height=sliceH;
+          const ctx=sliceCanvas.getContext('2d');
+          ctx.drawImage(sh.canvas,0,p*srcPageH,sh.canvas.width,sliceH,0,0,sh.canvas.width,sliceH);
+          const sliceData=sliceCanvas.toDataURL('image/png');
+          const drawH=contentW*(sliceH/sh.canvas.width);
+          pdf.addImage(sliceData,'PNG',MARGIN,MARGIN,imgW,drawH);
+        }
+      }
+    });
+    pdf.save(_getPreviewFileName()+'.pdf');
+  }catch(e){
+    alert('PDF 생성 오류: '+e.message);
+  }finally{
+    btn.disabled=false;btn.innerHTML=origText;
+  }
+}
+
+async function exportPreviewImage(){
+  const btns=document.querySelectorAll('.pv-export-btn');
+  const btn=btns[1];
+  const origText=btn.innerHTML;
+  btn.disabled=true;btn.innerHTML='생성 중…';
+  try{
+    const sheets=await _captureAllSheets();
+    if(!sheets.length) return;
+    const baseName=_getPreviewFileName();
+    sheets.forEach((sh,i)=>{
+      const url=sh.canvas.toDataURL('image/png');
+      const a=document.createElement('a');
+      a.href=url;
+      a.download=sheets.length>1?`${baseName}_${sh.name}.png`:`${baseName}.png`;
+      document.body.appendChild(a);a.click();document.body.removeChild(a);
+    });
+  }catch(e){
+    alert('이미지 생성 오류: '+e.message);
+  }finally{
+    btn.disabled=false;btn.innerHTML=origText;
+  }
+}
+
 /* ════════════════════════════════════════════════════════════════════
    구매요청서 기능
 ════════════════════════════════════════════════════════════════════ */
@@ -1142,11 +1258,24 @@ let purchaseItems = [];
 
 function buildPurchaseItems(source) {
   const payload = _buildPayload(source);
-  const items = payload.items || [];
+  const rawItems = payload.items || [];
   const result = [];
 
-  for (const it of items) {
+  // 세트를 멤버로 풀기
+  const flat = [];
+  for (const it of rawItems) {
     if (it.type === 'smart_group') continue;
+    if (it.type === 'set' && it.members) {
+      const mult = it.mult || 1;
+      it.members.forEach(m => {
+        flat.push({ itemId: m.itemId || '', name: m.n || m.name || '', spec: m.spec || '', unit: m.u || m.unit || 'EA', qty: (m.q || 1) * mult, note: m.note || '' });
+      });
+    } else {
+      flat.push(it);
+    }
+  }
+
+  for (const it of flat) {
     const pid = it.itemId || '';
     if (!pid || !PURCHASE_MAP[pid]) continue;
     const pm = PURCHASE_MAP[pid];
@@ -1293,6 +1422,7 @@ async function downloadPurchaseRequest() {
     const fname = `${ds} ${siteName || client} ${itemNames}${suppliers ? '(' + suppliers + ')' : ''}`;
     a.href = url; a.download = `${fname}.xlsx`;
     document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
+    autoSaveQuote('구매요청서');
     btn.textContent = '✓ 완료'; btn.style.borderColor = 'var(--sigbdr)'; btn.style.color = 'var(--sig)';
     setTimeout(() => { btn.textContent = orig; btn.style.borderColor = ''; btn.style.color = ''; btn.disabled = false; }, 2000);
   } catch (e) {

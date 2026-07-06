@@ -444,8 +444,13 @@ function buildPlan(items, hasEmptyRow, hasSafetyNote) {
   const safeGroups = new Set();
   if (hasSafetyNote) {
     for (const item of items) {
-      const cat = item.cat || '';
-      if (cat.includes('안전관리')) safeGroups.add(cat);
+      const g = item.group || item.cat || '';
+      const c = item.cat || '';
+      // group 또는 cat 중 하나라도 '안전관리'를 포함하면
+      // 해당 아이템이 속한 그룹을 안전관리 그룹으로 등록
+      if (g.includes('안전관리') || c.includes('안전관리')) {
+        safeGroups.add(g);
+      }
     }
   }
 
@@ -454,7 +459,7 @@ function buildPlan(items, hasEmptyRow, hasSafetyNote) {
   let groupIdx = 0;
 
   for (const item of items) {
-    const group = item.cat;
+    const group = item.group || item.cat;
 
     if (group !== curGroup) {
       if (curGroup !== null) {
@@ -488,7 +493,7 @@ function buildPlan(items, hasEmptyRow, hasSafetyNote) {
 
   const seen = new Set(), groupKeys = [];
   for (const item of items) {
-    const k = item.cat;
+    const k = item.group || item.cat;
     if (!seen.has(k)) { seen.add(k); groupKeys.push(k); }
   }
 
@@ -884,11 +889,18 @@ async function generateQuote(data) {
     }
   }
 
-  /* ── 11. printArea 제거 ───────────────────────────────────────────────
-        템플릿의 고정 printArea(예: "A1:F42")를 삭제해 행 수 제한을 없앤다. */
-  if (ws.pageSetup) {
-    delete ws.pageSetup.printArea;
-  }
+  /* ── 11. 프린트 범위 통일 ─────────────────────────────────────────────
+        모든 시트에 동일한 페이지 설정을 적용해 인쇄 결과를 일관되게 만든다. */
+  const lastCol = isCnco ? 'G' : 'F';
+  ws.pageSetup = {
+    ...(ws.pageSetup || {}),
+    printArea: `A1:${lastCol}${ws.rowCount}`,
+    fitToPage: true,
+    fitToWidth: 1,
+    fitToHeight: 0,
+    paperSize: 9,
+    orientation: 'portrait',
+  };
 
   const generated = await wb.xlsx.writeBuffer();
   return copyDrawings(templateBuf, generated);

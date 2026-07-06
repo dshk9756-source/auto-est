@@ -10,6 +10,9 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&family=Noto+Sans+KR:wght@400;500;600;700&display=swap" rel="stylesheet">
   <!-- CSS -->
   <link rel="stylesheet" href="style.css">
+  <!-- PDF/이미지 변환 -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 </head>
 <body>
 <div class="shell">
@@ -22,6 +25,12 @@
   <div class="h-nav">
     <button class="h-tab on" onclick="showView('a',this)">견적 작성</button>
     <button class="h-tab" onclick="showView('b',this)">견적 이력 <span id="hist-cnt" style="font-family:var(--mono);font-size:9px;color:var(--sig);margin-left:4px"></span></button>
+    <a href="/admin.html" class="h-tab" id="admin-link" style="text-decoration:none;display:none;align-items:center;font-size:12px;color:var(--mist);padding:6px 12px">카탈로그 관리</a>
+    <a href="/accounts.html" class="h-tab" id="accounts-link" style="text-decoration:none;display:none;align-items:center;font-size:12px;color:var(--mist);padding:6px 12px">계정 관리</a>
+    <div class="h-user" id="h-user" style="display:none">
+      <span class="h-user-name" id="h-user-name" onclick="openPwModal()" title="비밀번호 변경"></span>
+      <button class="h-logout" onclick="doLogout()">로그아웃</button>
+    </div>
   </div>
 </header>
 
@@ -68,7 +77,12 @@
 
       <div class="sh"><div class="sh-n">02</div>품목 카탈로그</div>
       <div class="ctabs" id="cat-tabs"></div>
-      <div id="tab-sets"><div class="cg" id="set-grid"></div></div>
+      <div id="tab-sets">
+        <div class="sbar">
+          <input class="si-in" id="set-q" placeholder="세트명 · 품목명 · 카테고리 검색..." oninput="filterSets()">
+        </div>
+        <div class="cg" id="set-grid"></div>
+      </div>
       <div id="tab-smart" style="display:none"><div class="cg" id="smart-grid"></div></div>
       <div id="tab-items" style="display:none">
         <div class="sbar">
@@ -83,7 +97,15 @@
   <div class="rp">
     <div class="rp-head">
       <div><div class="rp-title">견적 구성</div><div class="rp-meta" id="rp-meta">항목을 선택하세요</div></div>
-      <button class="rp-clr" onclick="clearCart()">초기화</button>
+      <div class="rp-actions">
+        <button class="rp-save-set" id="rp-save-set" onclick="openSaveSetUI()" style="display:none">세트 저장</button>
+        <button class="rp-clr" onclick="clearCart()">초기화</button>
+      </div>
+    </div>
+    <div class="save-set-bar" id="save-set-bar">
+      <input type="text" id="save-set-name" placeholder="새 세트 이름 입력..." class="save-set-input">
+      <button class="save-set-confirm" onclick="confirmSaveSet()">저장</button>
+      <button class="save-set-cancel" onclick="closeSaveSetUI()">취소</button>
     </div>
     <div class="cart-scroll" id="cart-scroll" ondragover="onCartDragOver(event)" ondragleave="onCartDragLeave(event)" ondrop="onCartDrop(event)">
       <div class="cart-empty"><svg viewBox="0 0 44 44"><rect x="4" y="12" width="36" height="26" rx="3"/><path d="M14 12V8a8 8 0 0116 0v4"/><circle cx="16" cy="25" r="2"/><circle cx="28" cy="25" r="2"/></svg><p>세트 패키지 또는 단품을<br>선택하면 여기에 담깁니다<br><br><span style="font-family:var(--mono);font-size:12px;color:var(--mist2)">단가는 직접 수정 가능합니다</span></p></div>
@@ -95,21 +117,21 @@
       <div class="tr-grand"><span class="tg-lbl">TOTAL</span><span class="tg-val" id="t-total">—</span></div>
       <div class="tr-note">단가 수정 시 자동 반영 · 별도협의 제외</div>
       <div class="markup-row" id="markup-row" style="display:none">
-        <span class="markup-lbl">단가 일괄 조정</span>
+        <span class="markup-lbl">단가조정</span>
         <div class="markup-controls">
           <input type="text" id="markup-pct" class="markup-input" placeholder="%" value="10">
           <span class="markup-unit">%</span>
           <button class="markup-btn up" onclick="applyMarkup(1)">인상</button>
           <button class="markup-btn down" onclick="applyMarkup(-1)">인하</button>
         </div>
-        <div class="markup-opt">
-          <label><input type="checkbox" id="markup-round" checked> 만원 단위 반올림</label>
-        </div>
+        <div class="markup-opt"><label><input type="checkbox" id="markup-round" checked> 만원 반올림</label></div>
       </div>
-      <button class="preview-btn" id="preview-btn" onclick="previewExcel()" disabled>미리보기</button>
-      <button class="excel-btn" id="excel-btn" onclick="generateExcel()" disabled>엑셀 다운로드</button>
-      <button class="purchase-btn" id="purchase-btn" onclick="openPurchaseModal()" disabled>구매요청서</button>
-      <button class="save-btn" id="save-btn" onclick="saveQuote()" disabled>이력에 저장</button>
+      <div class="btn-grid">
+        <button class="preview-btn" id="preview-btn" onclick="previewExcel()" disabled>미리보기</button>
+        <button class="purchase-btn" id="purchase-btn" onclick="openPurchaseModal()" disabled>구매요청서</button>
+        <button class="excel-btn" id="excel-btn" onclick="generateExcel()" disabled>엑셀 다운로드</button>
+      </div>
+      <div class="autosave-note" id="autosave-note"></div>
     </div>
   </div>
 </div>
@@ -126,6 +148,11 @@
         <button class="vb-flt" onclick="filterHist('cancel',this)">취소</button>
       </div>
     </div>
+    <div class="batch-bar" id="batch-bar">
+      <span class="batch-info"><strong id="batch-count">0</strong>건 선택됨</span>
+      <button class="batch-delete-btn" onclick="batchDelete()">선택 삭제</button>
+      <button class="batch-cancel-btn" onclick="clearSelection()">선택 해제</button>
+    </div>
     <div id="hist-body"></div>
   </div>
 </div>
@@ -137,6 +164,16 @@
     <div class="pv-header">
       <div class="pv-title">견적서 미리보기</div>
       <div class="pv-tabs" id="pv-tabs"></div>
+      <div class="pv-export-btns">
+        <button class="pv-export-btn" onclick="exportPreviewPDF()" title="PDF 다운로드">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><polyline points="9 15 12 18 15 15"/></svg>
+          PDF
+        </button>
+        <button class="pv-export-btn" onclick="exportPreviewImage()" title="이미지 다운로드">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+          PNG
+        </button>
+      </div>
       <button class="pv-close" onclick="closePreview()">&times;</button>
     </div>
     <div class="pv-body" id="pv-body">
@@ -165,8 +202,53 @@
   </div>
 </div>
 
-  <!-- SheetJS: 엑셀(catalog.xlsx) 파싱. 없으면 data/catalog.json 사용 -->
-  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<!-- 삭제 확인 모달 -->
+<div class="del-confirm-overlay" id="del-confirm-overlay" onclick="if(event.target===this)closeDeleteConfirm()">
+  <div class="del-confirm-modal">
+    <div class="del-confirm-icon">
+      <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="#DC3545" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="13"/><circle cx="12" cy="16" r="0.5" fill="#DC3545"/></svg>
+    </div>
+    <h3>견적 이력 삭제</h3>
+    <p><strong id="del-confirm-name"></strong> 견적을 삭제하시겠습니까?<br><span style="font-size:12px;color:var(--text3)">삭제된 견적은 복구할 수 없습니다.</span></p>
+    <div class="del-confirm-actions">
+      <button class="del-confirm-cancel" onclick="closeDeleteConfirm()">취소</button>
+      <button class="del-confirm-delete" onclick="confirmDelete()">삭제</button>
+    </div>
+  </div>
+</div>
+
+<!-- 비밀번호 변경 모달 -->
+<div class="pw-overlay" id="pw-overlay" onclick="if(event.target===this)closePwModal()">
+  <div class="pw-modal">
+    <h3>비밀번호 변경</h3>
+    <div class="pw-msg" id="pw-msg"></div>
+    <div class="pw-fg">
+      <label>현재 비밀번호</label>
+      <input type="password" id="pw-current" placeholder="현재 비밀번호 입력">
+    </div>
+    <div class="pw-fg">
+      <label>새 비밀번호</label>
+      <input type="password" id="pw-new" placeholder="4자 이상">
+    </div>
+    <div class="pw-fg">
+      <label>새 비밀번호 확인</label>
+      <input type="password" id="pw-confirm" placeholder="새 비밀번호 다시 입력">
+    </div>
+    <div class="pw-actions">
+      <button class="pw-btn pw-btn-cancel" onclick="closePwModal()">취소</button>
+      <button class="pw-btn pw-btn-save" id="pw-save-btn" onclick="doChangePw()">변경</button>
+    </div>
+  </div>
+</div>
+
+<!-- 세션 만료 안내 -->
+<div class="session-toast-bg" id="session-toast-bg"></div>
+<div class="session-toast" id="session-toast" style="display:none">
+  <h3>세션이 만료되었습니다</h3>
+  <p>보안을 위해 자동으로 로그아웃되었습니다.<br>다시 로그인해 주세요.</p>
+  <button onclick="location.href='/login.html'">로그인 페이지로 이동</button>
+</div>
+
   <script src="app.js"></script>
 </body>
 </html>

@@ -1,0 +1,364 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>로그인 - 견적 시스템</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+KR:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#E5EDF3;--surface:#F2F6F9;--sf2:#DBE4EC;
+  --border:rgba(0,0,0,0.07);--border2:rgba(0,0,0,0.12);
+  --text:#1E2D3A;--text2:#436078;--text3:#6E8CA0;
+  --pri:#3A8EC9;--pri-dk:#2E76A8;--pri-bg:rgba(58,142,201,0.10);--pri-bdr:rgba(58,142,201,0.32);
+  --red:#DC3545;
+  --green:#2EAD6B;--greenbg:rgba(46,173,107,0.08);--greenbdr:rgba(46,173,107,0.25);
+  --body:'Inter','Noto Sans KR',-apple-system,sans-serif;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:var(--body);background:var(--bg);display:flex;align-items:center;justify-content:center;min-height:100vh;padding:20px}
+
+.card{
+  background:#fff;border-radius:16px;padding:40px 36px 36px;width:100%;max-width:420px;
+  box-shadow:0 4px 24px rgba(0,0,0,0.08);border:1px solid var(--border);
+}
+.logo{text-align:center;margin-bottom:28px}
+.logo-text{font-size:1.5rem;font-weight:700;color:var(--text);letter-spacing:-0.03em}
+.logo-text span{color:var(--pri)}
+.logo-sub{font-size:0.8rem;color:var(--text3);margin-top:4px}
+
+/* Tabs */
+.tabs{display:flex;gap:4px;margin-bottom:24px;background:var(--surface);padding:4px;border-radius:10px;border:1px solid var(--border)}
+.tab{flex:1;padding:9px 0;border:none;background:transparent;color:var(--text3);cursor:pointer;
+  font-size:0.84rem;font-weight:500;border-radius:7px;transition:all 0.15s;text-align:center;font-family:var(--body)}
+.tab:hover{color:var(--text2);background:var(--sf2)}
+.tab.on{background:#fff;color:var(--pri);box-shadow:0 1px 3px rgba(0,0,0,0.08);font-weight:600}
+
+/* Panels */
+.panel{display:none}
+.panel.on{display:block}
+
+/* Form */
+.fg{margin-bottom:14px}
+.fg label{display:block;font-size:0.82rem;font-weight:500;color:var(--text2);margin-bottom:5px}
+.fg input{
+  width:100%;padding:11px 14px;border:1px solid var(--border2);border-radius:8px;
+  font-size:0.88rem;font-family:var(--body);color:var(--text);background:#fff;
+  transition:border-color 0.15s;outline:none;
+}
+.fg input:focus{border-color:var(--pri);box-shadow:0 0 0 3px var(--pri-bg)}
+.fg .hint{font-size:0.73rem;color:var(--text3);margin-top:4px}
+
+.submit-btn{
+  width:100%;padding:12px;border:none;border-radius:8px;
+  background:var(--pri);color:#fff;font-size:0.9rem;font-weight:600;
+  font-family:var(--body);cursor:pointer;transition:all 0.15s;margin-top:8px;
+}
+.submit-btn:hover{background:var(--pri-dk);transform:translateY(-1px);box-shadow:0 2px 8px rgba(58,142,201,0.3)}
+.submit-btn:active{transform:translateY(0)}
+.submit-btn:disabled{opacity:0.6;cursor:not-allowed;transform:none}
+.submit-btn.green{background:var(--green)}
+.submit-btn.green:hover{background:#269b5e;box-shadow:0 2px 8px rgba(46,173,107,0.3)}
+
+/* Messages */
+.msg{
+  display:none;padding:10px 14px;border-radius:8px;font-size:0.82rem;font-weight:500;
+  margin-bottom:14px;text-align:center;
+}
+.msg.err{background:rgba(220,53,69,0.06);color:var(--red);border:1px solid rgba(220,53,69,0.2)}
+.msg.ok{background:var(--greenbg);color:var(--green);border:1px solid var(--greenbdr)}
+.msg.show{display:block}
+
+/* Find ID result */
+.find-results{margin-top:16px}
+.find-results .result-title{font-size:0.82rem;font-weight:600;color:var(--text2);margin-bottom:10px}
+.find-card{
+  background:var(--surface);border:1px solid var(--border2);border-radius:8px;padding:14px 16px;
+  margin-bottom:8px;
+}
+.find-card .find-row{display:flex;align-items:center;gap:8px;margin-bottom:4px}
+.find-card .find-row:last-child{margin-bottom:0}
+.find-label{font-size:0.78rem;color:var(--text3);font-weight:500;min-width:50px}
+.find-value{font-size:0.88rem;color:var(--text);font-weight:600;letter-spacing:0.02em}
+.find-team{font-size:0.78rem;color:var(--text3);font-weight:400}
+
+/* Footer link */
+.foot{text-align:center;margin-top:16px;font-size:0.82rem;color:var(--text3)}
+.foot a{color:var(--pri);text-decoration:none;font-weight:500;cursor:pointer}
+.foot a:hover{text-decoration:underline}
+.id-ok{color:var(--green) !important;font-weight:500}
+.id-dup{color:var(--red) !important;font-weight:500}
+</style>
+</head>
+<body>
+
+<div class="card">
+  <div class="logo">
+    <div class="logo-text">OPEN<span>WORKS</span></div>
+    <div class="logo-sub">스마트 안전관리 솔루션</div>
+  </div>
+
+  <div class="tabs">
+    <button class="tab on" onclick="switchTab('login')">로그인</button>
+    <button class="tab" onclick="switchTab('register')">회원가입</button>
+    <button class="tab" onclick="switchTab('find')">아이디 찾기</button>
+  </div>
+
+  <!-- 로그인 패널 -->
+  <div class="panel on" id="p-login">
+    <div class="msg err" id="login-msg"></div>
+    <form onsubmit="doLogin(event)">
+      <div class="fg">
+        <label>아이디</label>
+        <input id="login-id" placeholder="아이디 입력" autocomplete="username" autofocus>
+      </div>
+      <div class="fg">
+        <label>비밀번호</label>
+        <input id="login-pw" type="password" placeholder="비밀번호 입력" autocomplete="current-password">
+      </div>
+      <button type="submit" class="submit-btn" id="login-btn">로그인</button>
+    </form>
+    <div class="foot">
+      계정이 없으신가요? <a onclick="switchTab('register')">회원가입</a>
+    </div>
+  </div>
+
+  <!-- 회원가입 패널 -->
+  <div class="panel" id="p-register">
+    <div class="msg" id="reg-msg"></div>
+    <form onsubmit="doRegister(event)">
+      <div class="fg">
+        <label>아이디</label>
+        <input id="reg-id" placeholder="영문/숫자 조합 (2자 이상)" autocomplete="off" oninput="checkIdDup()">
+        <div class="hint" id="reg-id-status"></div>
+      </div>
+      <div class="fg">
+        <label>비밀번호</label>
+        <input id="reg-pw" type="password" placeholder="4자 이상" autocomplete="new-password">
+      </div>
+      <div class="fg">
+        <label>사용자 이름</label>
+        <input id="reg-name" placeholder="예: 홍길동">
+      </div>
+      <div class="fg">
+        <label>팀 이름</label>
+        <input id="reg-team" placeholder="예: 스마트건설팀">
+        <div class="hint">소속 팀명을 입력하세요 (선택사항)</div>
+      </div>
+      <button type="submit" class="submit-btn green" id="reg-btn">회원가입</button>
+    </form>
+    <div class="foot">
+      이미 계정이 있으신가요? <a onclick="switchTab('login')">로그인</a>
+    </div>
+  </div>
+
+  <!-- 아이디 찾기 패널 -->
+  <div class="panel" id="p-find">
+    <div class="msg" id="find-msg"></div>
+    <form onsubmit="doFindId(event)">
+      <div class="fg">
+        <label>사용자 이름</label>
+        <input id="find-name" placeholder="가입 시 입력한 이름">
+        <div class="hint">가입할 때 입력한 사용자 이름으로 검색합니다</div>
+      </div>
+      <button type="submit" class="submit-btn" id="find-btn">아이디 찾기</button>
+    </form>
+    <div class="find-results" id="find-results" style="display:none">
+      <div class="result-title">검색 결과</div>
+      <div id="find-list"></div>
+    </div>
+    <div class="foot">
+      계정을 찾으셨나요? <a onclick="switchTab('login')">로그인</a>
+    </div>
+  </div>
+</div>
+
+<script>
+// 탭 전환
+function switchTab(name){
+  document.querySelectorAll('.tab').forEach((t,i) => {
+    t.classList.toggle('on', ['login','register','find'][i] === name);
+  });
+  document.querySelectorAll('.panel').forEach(p => p.classList.remove('on'));
+  document.getElementById('p-'+name).classList.add('on');
+  // 메시지 초기화
+  document.querySelectorAll('.msg').forEach(m => m.classList.remove('show'));
+  // 포커스
+  const focusMap = { login:'login-id', register:'reg-id', find:'find-name' };
+  const el = document.getElementById(focusMap[name]);
+  if(el) setTimeout(()=>el.focus(), 100);
+}
+
+function showMsg(id, msg, type){
+  const el = document.getElementById(id);
+  el.textContent = msg;
+  el.className = 'msg ' + type + ' show';
+}
+
+// ── 로그인 ──
+async function doLogin(e){
+  e.preventDefault();
+  const id = document.getElementById('login-id').value.trim();
+  const pw = document.getElementById('login-pw').value;
+  const btn = document.getElementById('login-btn');
+
+  if(!id||!pw){ showMsg('login-msg','아이디와 비밀번호를 입력하세요.','err'); return; }
+
+  btn.disabled = true;
+  btn.textContent = '로그인 중...';
+  document.getElementById('login-msg').classList.remove('show');
+
+  try{
+    const res = await fetch('/api/auth/login', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({id, pw})
+    });
+    const data = await res.json();
+    if(!res.ok){ showMsg('login-msg', data.error || '로그인 실패','err'); return; }
+    location.href = '/';
+  }catch(e){
+    showMsg('login-msg','서버 연결 실패','err');
+  }finally{
+    btn.disabled = false;
+    btn.textContent = '로그인';
+  }
+}
+
+// ── 아이디 중복 확인 ──
+let _idCheckTimer = null;
+let _idAvailable = false;
+
+function checkIdDup(){
+  clearTimeout(_idCheckTimer);
+  const status = document.getElementById('reg-id-status');
+  const id = document.getElementById('reg-id').value.trim();
+  _idAvailable = false;
+
+  if(!id || id.length < 2){
+    status.textContent = id.length > 0 ? '2자 이상 입력하세요' : '';
+    status.className = 'hint';
+    return;
+  }
+  status.textContent = '확인 중...';
+  status.className = 'hint';
+
+  _idCheckTimer = setTimeout(async ()=>{
+    try{
+      const r = await fetch('/api/auth/check-id?id='+encodeURIComponent(id));
+      const data = await r.json();
+      // 입력값이 바뀌었으면 무시
+      if(document.getElementById('reg-id').value.trim() !== id) return;
+      if(data.exists){
+        status.textContent = '이미 사용 중인 아이디입니다';
+        status.className = 'hint id-dup';
+        _idAvailable = false;
+      } else {
+        status.textContent = '사용 가능한 아이디입니다';
+        status.className = 'hint id-ok';
+        _idAvailable = true;
+      }
+    }catch(e){
+      status.textContent = '';
+      status.className = 'hint';
+    }
+  }, 400);
+}
+
+// ── 회원가입 ──
+async function doRegister(e){
+  e.preventDefault();
+  const id = document.getElementById('reg-id').value.trim();
+  const pw = document.getElementById('reg-pw').value;
+  const name = document.getElementById('reg-name').value.trim();
+  const team = document.getElementById('reg-team').value.trim();
+  const btn = document.getElementById('reg-btn');
+
+  if(!id){ showMsg('reg-msg','아이디를 입력하세요.','err'); return; }
+  if(id.length < 2){ showMsg('reg-msg','아이디는 2자 이상이어야 합니다.','err'); return; }
+  if(!_idAvailable){ showMsg('reg-msg','아이디 중복을 확인해 주세요.','err'); return; }
+  if(!pw || pw.length < 4){ showMsg('reg-msg','비밀번호는 4자 이상 입력하세요.','err'); return; }
+  if(!name){ showMsg('reg-msg','사용자 이름을 입력하세요.','err'); return; }
+
+  btn.disabled = true;
+  btn.textContent = '가입 중...';
+  document.getElementById('reg-msg').classList.remove('show');
+
+  try{
+    const res = await fetch('/api/auth/register', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({id, pw, name, team})
+    });
+    const data = await res.json();
+    if(!res.ok){ showMsg('reg-msg', data.error || '회원가입 실패','err'); return; }
+    showMsg('reg-msg','회원가입이 완료되었습니다! 로그인해 주세요.','ok');
+    // 입력 초기화
+    document.getElementById('reg-id').value = '';
+    document.getElementById('reg-pw').value = '';
+    document.getElementById('reg-name').value = '';
+    document.getElementById('reg-team').value = '';
+    // 2초 후 로그인 탭으로 전환
+    setTimeout(()=>{ switchTab('login'); document.getElementById('login-id').value = id; }, 2000);
+  }catch(e){
+    showMsg('reg-msg','서버 연결 실패','err');
+  }finally{
+    btn.disabled = false;
+    btn.textContent = '회원가입';
+  }
+}
+
+// ── 아이디 찾기 ──
+function esc(s){ const d=document.createElement('div'); d.textContent=s; return d.innerHTML; }
+
+async function doFindId(e){
+  e.preventDefault();
+  const name = document.getElementById('find-name').value.trim();
+  const btn = document.getElementById('find-btn');
+  const results = document.getElementById('find-results');
+  const list = document.getElementById('find-list');
+
+  if(!name){ showMsg('find-msg','사용자 이름을 입력하세요.','err'); return; }
+
+  btn.disabled = true;
+  btn.textContent = '검색 중...';
+  document.getElementById('find-msg').classList.remove('show');
+  results.style.display = 'none';
+
+  try{
+    const res = await fetch('/api/auth/find-id', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({name})
+    });
+    const data = await res.json();
+    if(!res.ok){ showMsg('find-msg', data.error || '검색 실패','err'); return; }
+
+    // 결과 표시
+    list.innerHTML = data.map(u => `
+      <div class="find-card">
+        <div class="find-row">
+          <span class="find-label">아이디</span>
+          <span class="find-value">${esc(u.id)}</span>
+        </div>
+        <div class="find-row">
+          <span class="find-label">이름</span>
+          <span class="find-value">${esc(u.name)}</span>
+          ${u.team ? '<span class="find-team">(' + esc(u.team) + ')</span>' : ''}
+        </div>
+      </div>
+    `).join('');
+    results.style.display = 'block';
+    showMsg('find-msg', data.length + '개의 계정을 찾았습니다.','ok');
+  }catch(e){
+    showMsg('find-msg','서버 연결 실패','err');
+  }finally{
+    btn.disabled = false;
+    btn.textContent = '아이디 찾기';
+  }
+}
+
+// 이미 로그인 상태면 바로 메인으로
+fetch('/api/auth/me').then(r=>{if(r.ok) location.href='/';}).catch(()=>{});
+</script>
+</body>
+</html>

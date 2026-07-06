@@ -1,0 +1,613 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>카탈로그 관리</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&family=Noto+Sans+KR:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#E5EDF3;--surface:#F2F6F9;--sf2:#DBE4EC;--sf3:#CDD8E2;
+  --border:rgba(0,0,0,0.07);--border2:rgba(0,0,0,0.12);--border3:rgba(0,0,0,0.20);
+  --text:#1E2D3A;--text2:#436078;--text3:#6E8CA0;
+  --pri:#3A8EC9;--pri-dk:#2E76A8;--pri-bg:rgba(58,142,201,0.10);--pri-bdr:rgba(58,142,201,0.32);
+  --green:#2EAD6B;--greenbg:rgba(46,173,107,0.08);--greenbdr:rgba(46,173,107,0.25);
+  --red:#DC3545;--redbg:rgba(220,53,69,0.06);--redbdr:rgba(220,53,69,0.22);
+  --amber:#E8960A;
+  --mono:'JetBrains Mono','Consolas',monospace;
+  --body:'Inter','Noto Sans KR',-apple-system,sans-serif;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+input,select,textarea,button{font-family:inherit}
+body{font-family:var(--body);background:var(--bg);color:var(--text);padding:20px 24px;max-width:1260px;margin:0 auto;line-height:1.5}
+
+/* Header */
+.hdr{display:flex;align-items:center;gap:12px;margin-bottom:20px;flex-wrap:wrap;padding-bottom:16px;border-bottom:1px solid var(--border2)}
+.hdr h1{font-size:1.25rem;flex:1;font-weight:700;letter-spacing:-0.02em}
+.hdr-actions{display:flex;gap:8px}
+
+/* Tabs */
+.tabs{display:flex;gap:6px;margin-bottom:20px;flex-wrap:wrap;background:var(--surface);padding:4px;border-radius:10px;border:1px solid var(--border)}
+.tab{flex:1;padding:9px 12px;border:none;background:transparent;color:var(--text2);cursor:pointer;font-size:0.84rem;font-weight:500;border-radius:7px;transition:all 0.15s;text-align:center}
+.tab:hover{background:var(--sf2);color:var(--text)}
+.tab.on{background:#fff;color:var(--pri);box-shadow:0 1px 3px rgba(0,0,0,0.08)}
+.pane{display:none}
+.pane.on{display:block}
+
+/* Buttons */
+.btn{padding:7px 16px;background:var(--pri);color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:0.83rem;font-weight:500;white-space:nowrap;transition:all 0.15s}
+.btn:hover{background:var(--pri-dk);transform:translateY(-1px);box-shadow:0 2px 6px rgba(58,142,201,0.25)}
+.btn:active{transform:translateY(0)}
+.btn-sm{padding:5px 12px;font-size:0.8rem}
+.btn-add{background:var(--green)}
+.btn-add:hover{background:#269b5e;box-shadow:0 2px 6px rgba(46,173,107,0.25)}
+.btn-del{background:transparent;color:var(--red);border:1px solid var(--redbdr);padding:4px 10px;font-size:0.8rem;border-radius:5px;cursor:pointer;transition:all 0.15s}
+.btn-del:hover{background:var(--redbg);border-color:var(--red)}
+.btn-save{background:var(--green)}
+.btn-save:hover{background:#269b5e;box-shadow:0 2px 6px rgba(46,173,107,0.25)}
+.btn-cancel{background:var(--sf2);color:var(--text2);border:1px solid var(--border2)}
+.btn-cancel:hover{background:var(--sf3);color:var(--text)}
+.btn-backup{background:var(--surface);color:var(--text2);border:1px solid var(--border2)}
+.btn-backup:hover{background:var(--sf2);color:var(--text)}
+
+/* Search */
+.search-bar{display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap}
+.search-bar input{flex:1;min-width:150px;padding:9px 12px;border:1px solid var(--border2);border-radius:7px;font-size:0.84rem;background:#fff;color:var(--text);transition:border-color 0.15s}
+.search-bar input:focus{border-color:var(--pri);outline:none;box-shadow:0 0 0 3px var(--pri-bg)}
+.search-bar select{padding:9px 12px;border:1px solid var(--border2);border-radius:7px;font-size:0.84rem;background:#fff;color:var(--text)}
+
+/* Table */
+.tbl-wrap{overflow-x:auto;background:#fff;border-radius:10px;border:1px solid var(--border);box-shadow:0 1px 3px rgba(0,0,0,0.04)}
+table{width:100%;border-collapse:collapse;font-size:0.82rem}
+th{background:var(--surface);padding:10px 10px;text-align:left;border-bottom:1px solid var(--border2);white-space:nowrap;position:sticky;top:0;font-weight:600;color:var(--text2);font-size:0.78rem;text-transform:uppercase;letter-spacing:0.03em}
+td{padding:8px 10px;border-bottom:1px solid var(--border);vertical-align:top}
+tr:hover{background:var(--pri-bg)}
+td input,td select,td textarea{width:100%;padding:5px 8px;border:1px solid var(--border2);border-radius:5px;background:#fff;color:var(--text);font-size:0.82rem;font-family:inherit;transition:border-color 0.15s}
+td textarea{min-height:60px;resize:vertical}
+td input:focus,td textarea:focus{border-color:var(--pri);outline:none;box-shadow:0 0 0 3px var(--pri-bg)}
+.cell-id{font-family:var(--mono);font-size:0.78rem;color:var(--pri);font-weight:500}
+.cell-price{font-family:var(--mono);text-align:right;font-weight:500}
+.cell-actions{white-space:nowrap;display:flex;gap:4px}
+.row-edit{background:var(--pri-bg) !important}
+
+/* Set card */
+.set-card{background:#fff;border:1px solid var(--border);border-radius:10px;margin-bottom:10px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,0.04);transition:box-shadow 0.15s}
+.set-card:hover{box-shadow:0 2px 8px rgba(0,0,0,0.08)}
+.set-header{display:flex;align-items:center;gap:8px;padding:12px 14px;cursor:pointer;transition:background 0.1s}
+.set-header:hover{background:var(--surface)}
+.set-name{flex:1;font-weight:600;color:var(--text)}
+.set-badge{font-size:0.75rem;padding:3px 10px;border-radius:20px;background:var(--pri-bg);color:var(--pri);font-weight:500;border:1px solid var(--pri-bdr)}
+.set-body{display:none;padding:0 14px 14px;border-top:1px solid var(--border)}
+.set-card.open .set-body{display:block}
+.mem-tbl{margin-top:8px}
+.mem-tbl td{padding:5px 8px}
+
+/* Toast */
+.toast{position:fixed;bottom:24px;right:24px;background:var(--green);color:#fff;padding:12px 24px;border-radius:8px;font-size:0.85rem;font-weight:500;opacity:0;transition:opacity 0.3s;z-index:999;pointer-events:none;box-shadow:0 4px 12px rgba(46,173,107,0.3)}
+.toast.show{opacity:1}
+
+/* Modal */
+.modal-bg{display:none;position:fixed;inset:0;background:rgba(30,45,58,0.45);backdrop-filter:blur(4px);z-index:100;align-items:center;justify-content:center}
+.modal-bg.open{display:flex}
+.modal{background:#fff;border:1px solid var(--border2);border-radius:12px;width:90%;max-width:600px;max-height:80vh;overflow-y:auto;padding:24px;box-shadow:0 8px 30px rgba(0,0,0,0.12)}
+.modal h3{margin-bottom:16px;font-size:1.1rem;font-weight:700;color:var(--text)}
+.modal .fg{margin-bottom:12px}
+.modal .fg label{display:block;font-size:0.8rem;color:var(--text3);margin-bottom:5px;font-weight:500}
+.modal .fg input,.modal .fg textarea,.modal .fg select{width:100%;padding:9px 12px;border:1px solid var(--border2);border-radius:7px;background:#fff;color:var(--text);font-size:0.85rem;font-family:inherit;transition:border-color 0.15s}
+.modal .fg input:focus,.modal .fg textarea:focus,.modal .fg select:focus{border-color:var(--pri);outline:none;box-shadow:0 0 0 3px var(--pri-bg)}
+.modal .fg textarea{min-height:80px;resize:vertical}
+.modal-actions{display:flex;gap:8px;margin-top:20px;justify-content:flex-end}
+
+.empty{text-align:center;color:var(--text3);padding:40px;font-size:0.9rem}
+.back-link{color:var(--pri);text-decoration:none;font-size:0.85rem;font-weight:500}
+.back-link:hover{text-decoration:underline;color:var(--pri-dk)}
+.count-badge{font-size:0.75rem;color:var(--text3);margin-left:8px}
+.hdr-user{font-size:0.82rem;color:var(--text2);font-weight:500}
+.hdr-user .role-badge{font-size:0.7rem;padding:1px 6px;border-radius:4px;margin-left:4px;font-weight:600;background:var(--pri-bg);color:var(--pri);border:1px solid var(--pri-bdr)}
+.btn-logout{background:transparent !important;color:var(--text3) !important;border:1px solid var(--border2) !important;font-size:0.8rem !important}
+.btn-logout:hover{background:var(--redbg) !important;border-color:var(--redbdr) !important;color:var(--red) !important;box-shadow:none !important}
+</style>
+</head>
+<body>
+
+<div class="hdr">
+  <a href="/" class="back-link">← 견적 작성</a>
+  <a href="/accounts.html" class="back-link" style="margin-left:8px">계정 관리 →</a>
+  <h1>카탈로그 관리</h1>
+  <div class="hdr-actions">
+    <span class="hdr-user" id="hdr-user"></span>
+    <button class="btn btn-backup" onclick="backup()">백업</button>
+    <button class="btn btn-logout" onclick="doLogout()">로그아웃</button>
+  </div>
+</div>
+
+<div class="tabs">
+  <button class="tab on" data-tab="items">단품</button>
+  <button class="tab" data-tab="sets">세트</button>
+  <button class="tab" data-tab="smart">스마트그룹</button>
+  <button class="tab" data-tab="purchase">구매요청</button>
+  <button class="tab" data-tab="notes">특기사항</button>
+</div>
+
+<!-- 단품 -->
+<div class="pane on" id="p-items">
+  <div class="search-bar">
+    <input id="item-q" placeholder="품목명 · 사양 검색..." oninput="renderItems()">
+    <select id="item-cat" onchange="renderItems()"><option value="">전체 카테고리</option></select>
+    <button class="btn btn-add" onclick="openItemModal()">+ 단품 추가</button>
+  </div>
+  <div class="tbl-wrap"><table><thead><tr>
+    <th style="width:90px">ID</th><th style="width:100px">카테고리</th><th>품목명</th><th>사양</th><th style="width:50px">단위</th><th style="width:90px">단가</th><th style="width:80px">비고</th><th style="width:80px"></th>
+  </tr></thead><tbody id="items-body"></tbody></table></div>
+</div>
+
+<!-- 세트 -->
+<div class="pane" id="p-sets">
+  <div class="search-bar">
+    <button class="btn btn-add" onclick="openSetModal()">+ 세트 추가</button>
+  </div>
+  <div id="sets-body"></div>
+</div>
+
+<!-- 스마트그룹 -->
+<div class="pane" id="p-smart">
+  <div class="search-bar">
+    <button class="btn btn-add" onclick="openSmartModal()">+ 스마트그룹 추가</button>
+  </div>
+  <div id="smart-body"></div>
+</div>
+
+<!-- 구매요청 -->
+<div class="pane" id="p-purchase">
+  <div class="search-bar">
+    <input id="pm-q" placeholder="품목명 · 구매처 검색..." oninput="renderPurchase()">
+    <button class="btn btn-add" onclick="openPmModal()">+ 구매요청 추가</button>
+  </div>
+  <div class="tbl-wrap"><table><thead><tr>
+    <th style="width:90px">품목ID</th><th>구매품목명</th><th>기본구매처</th><th style="width:120px">비고</th><th style="width:80px"></th>
+  </tr></thead><tbody id="pm-body"></tbody></table></div>
+</div>
+
+<!-- 특기사항 -->
+<div class="pane" id="p-notes">
+  <div class="search-bar">
+    <button class="btn btn-add" onclick="addNote()">+ 특기사항 추가</button>
+    <button class="btn btn-save" onclick="saveNotes()">저장</button>
+  </div>
+  <div id="notes-body"></div>
+</div>
+
+<!-- Item Modal -->
+<div class="modal-bg" id="item-modal">
+  <div class="modal">
+    <h3 id="item-modal-title">단품 추가</h3>
+    <input type="hidden" id="im-id">
+    <div class="fg"><label>카테고리</label><input id="im-cat" placeholder="예: 고정식 카메라"></div>
+    <div class="fg"><label>품목명</label><input id="im-name"></div>
+    <div class="fg"><label>사양</label><textarea id="im-spec"></textarea></div>
+    <div style="display:flex;gap:8px">
+      <div class="fg" style="flex:1"><label>단위</label><input id="im-u" value="EA"></div>
+      <div class="fg" style="flex:2"><label>단가</label><input id="im-p" inputmode="numeric" oninput="formatPriceField(this)" placeholder="0"></div>
+    </div>
+    <div class="fg"><label>비고</label><input id="im-note"></div>
+    <div class="modal-actions">
+      <button class="btn btn-cancel" onclick="closeModal('item-modal')">취소</button>
+      <button class="btn btn-save" onclick="saveItem()">저장</button>
+    </div>
+  </div>
+</div>
+
+<!-- Set Modal -->
+<div class="modal-bg" id="set-modal">
+  <div class="modal">
+    <h3 id="set-modal-title">세트 추가</h3>
+    <input type="hidden" id="sm-id">
+    <div class="fg"><label>세트명</label><input id="sm-name"></div>
+    <h4 style="margin:12px 0 8px;font-size:0.85rem">구성 멤버</h4>
+    <div id="sm-members"></div>
+    <button class="btn btn-sm btn-add" onclick="addSetMember()" style="margin-top:8px">+ 멤버 추가</button>
+    <div class="modal-actions">
+      <button class="btn btn-cancel" onclick="closeModal('set-modal')">취소</button>
+      <button class="btn btn-save" onclick="saveSet()">저장</button>
+    </div>
+  </div>
+</div>
+
+<!-- Smart Group Modal -->
+<div class="modal-bg" id="smart-modal">
+  <div class="modal">
+    <h3 id="smart-modal-title">스마트그룹 추가</h3>
+    <input type="hidden" id="sg-id">
+    <div class="fg"><label>그룹명</label><input id="sg-name"></div>
+    <div style="display:flex;gap:8px">
+      <div class="fg" style="flex:1"><label>카테고리</label><input id="sg-cat"></div>
+      <div class="fg" style="flex:1"><label>순서</label><input id="sg-sort" type="number" value="0"></div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-cancel" onclick="closeModal('smart-modal')">취소</button>
+      <button class="btn btn-save" onclick="saveSmartGroup()">저장</button>
+    </div>
+  </div>
+</div>
+
+<!-- Purchase Map Modal -->
+<div class="modal-bg" id="pm-modal">
+  <div class="modal">
+    <h3 id="pm-modal-title">구매요청 추가</h3>
+    <div class="fg"><label>품목ID</label>
+      <select id="pm-id"><option value="">선택...</option></select>
+    </div>
+    <div class="fg"><label>구매품목명</label><input id="pm-name"></div>
+    <div class="fg"><label>기본구매처</label><input id="pm-supplier"></div>
+    <div class="fg"><label>비고</label><input id="pm-note"></div>
+    <div class="modal-actions">
+      <button class="btn btn-cancel" onclick="closeModal('pm-modal')">취소</button>
+      <button class="btn btn-save" onclick="savePm()">저장</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+// 세션 확인 & 로그아웃
+(async function checkSession(){
+  try{
+    const r = await fetch('/api/auth/me');
+    if(!r.ok){ location.href='/login.html'; return; }
+    const u = await r.json();
+    const el = document.getElementById('hdr-user');
+    if(el) el.innerHTML = u.name + ' <span class="role-badge">관리자</span>';
+  }catch(e){ location.href='/login.html'; }
+})();
+async function doLogout(){
+  try{ await fetch('/api/auth/logout',{method:'POST'}); }catch(e){}
+  location.href='/login.html';
+}
+
+const API = '/api/catalog';
+let items=[], sets=[], smartGroups=[], smartItems=[], purchaseMap=[], notesDefault=[];
+let editingItemId=null, editingSetId=null, editingSmartId=null, editingPmId=null;
+
+const esc = s => { const d=document.createElement('div'); d.textContent=s; return d.innerHTML; };
+const N = n => Math.round(n).toLocaleString('ko-KR');
+function formatPriceField(el){
+  const raw = el.value.replace(/[^0-9]/g,'');
+  if(!raw){el.value='';return;}
+  el.value = parseInt(raw,10).toLocaleString('ko-KR');
+}
+function priceToNum(s){ return parseInt(String(s).replace(/[^0-9]/g,''),10)||0; }
+
+function toast(msg, ms=2000) {
+  const el=document.getElementById('toast');
+  el.textContent=msg; el.classList.add('show');
+  setTimeout(()=>el.classList.remove('show'), ms);
+}
+
+async function api(path, opts) {
+  const res = await fetch(API+path, {headers:{'Content-Type':'application/json'},...opts});
+  if (!res.ok) { const e=await res.json().catch(()=>({error:'서버 오류'})); throw new Error(e.error); }
+  return res.json();
+}
+
+// ── Load ──
+async function loadAll() {
+  [items, sets, {groups:smartGroups, items:smartItems}, purchaseMap, notesDefault] = await Promise.all([
+    api('/items'), api('/sets'), api('/smart-groups'), api('/purchase-map'), api('/notes'),
+  ]);
+  renderItems(); renderSets(); renderSmart(); renderPurchase(); renderNotes();
+  fillCatFilter();
+}
+
+function fillCatFilter() {
+  const cats=[...new Set(items.map(i=>i.cat).filter(Boolean))].sort();
+  const sel=document.getElementById('item-cat');
+  sel.innerHTML='<option value="">전체 카테고리</option>'+cats.map(c=>`<option>${esc(c)}</option>`).join('');
+}
+
+// ── Tabs ──
+document.querySelectorAll('.tab').forEach(t => {
+  t.addEventListener('click', () => {
+    document.querySelectorAll('.tab').forEach(b=>b.classList.remove('on'));
+    document.querySelectorAll('.pane').forEach(p=>p.classList.remove('on'));
+    t.classList.add('on');
+    document.getElementById('p-'+t.dataset.tab).classList.add('on');
+  });
+});
+
+function closeModal(id) { document.getElementById(id).classList.remove('open'); }
+
+// ══════════════ ITEMS ══════════════
+
+function renderItems() {
+  const q=(document.getElementById('item-q').value||'').toLowerCase();
+  const cat=document.getElementById('item-cat').value;
+  const list=items.filter(i=>(!q||i.name.toLowerCase().includes(q)||i.spec.toLowerCase().includes(q)||(i.note||'').toLowerCase().includes(q))&&(!cat||i.cat===cat));
+  document.getElementById('items-body').innerHTML=list.map(i=>`<tr>
+    <td class="cell-id">${esc(i.id)}</td>
+    <td>${esc(i.cat)}</td>
+    <td>${esc(i.name)}</td>
+    <td style="max-width:300px;white-space:pre-wrap;font-size:0.78rem;color:#6E8CA0">${esc(i.spec).slice(0,120)}${i.spec.length>120?'…':''}</td>
+    <td>${esc(i.u)}</td>
+    <td class="cell-price">${N(i.p)}</td>
+    <td style="font-size:0.78rem;color:#6E8CA0">${esc(i.note||'')}</td>
+    <td class="cell-actions">
+      <button class="btn btn-sm" onclick="openItemModal('${esc(i.id)}')">수정</button>
+      <button class="btn-del" onclick="deleteItem('${esc(i.id)}')">삭제</button>
+    </td>
+  </tr>`).join('') || '<tr><td colspan="8" class="empty">항목이 없습니다</td></tr>';
+}
+
+function openItemModal(id) {
+  editingItemId=id||null;
+  const m=id?items.find(i=>i.id===id):null;
+  document.getElementById('item-modal-title').textContent=m?'단품 수정':'단품 추가';
+  document.getElementById('im-id').value=m?m.id:'';
+  document.getElementById('im-cat').value=m?m.cat:'';
+  document.getElementById('im-name').value=m?m.name:'';
+  document.getElementById('im-spec').value=m?m.spec:'';
+  document.getElementById('im-u').value=m?m.u:'EA';
+  document.getElementById('im-p').value=m?N(m.p):'';
+  document.getElementById('im-note').value=m?m.note||'':'';
+  document.getElementById('item-modal').classList.add('open');
+}
+
+async function saveItem() {
+  const data={
+    id:document.getElementById('im-id').value.trim(),
+    cat:document.getElementById('im-cat').value,
+    name:document.getElementById('im-name').value,
+    spec:document.getElementById('im-spec').value,
+    u:document.getElementById('im-u').value||'EA',
+    p:priceToNum(document.getElementById('im-p').value),
+    note:document.getElementById('im-note').value,
+  };
+  if(!data.name){return alert('품목명은 필수입니다.');}
+  try{
+    if(editingItemId) await api('/items/'+encodeURIComponent(editingItemId),{method:'PUT',body:JSON.stringify(data)});
+    else await api('/items',{method:'POST',body:JSON.stringify(data)});
+    closeModal('item-modal');
+    await loadAll();
+    toast(editingItemId?'수정 완료':'추가 완료');
+  }catch(e){alert(e.message);}
+}
+
+async function deleteItem(id) {
+  if(!confirm(`"${id}" 단품을 삭제할까요?`)) return;
+  try{ await api('/items/'+encodeURIComponent(id),{method:'DELETE'}); await loadAll(); toast('삭제 완료'); }
+  catch(e){alert(e.message);}
+}
+
+// ══════════════ SETS ══════════════
+
+function renderSets() {
+  const body=document.getElementById('sets-body');
+  if(!sets.length){body.innerHTML='<div class="empty">세트가 없습니다</div>';return;}
+  body.innerHTML=sets.map(s=>{
+    const memHtml=s.members.map((m,i)=>{
+      const linked=items.find(it=>it.id===m.itemId);
+      return `<tr>
+        <td class="cell-id">${esc(m.itemId)}</td>
+        <td>${esc(linked?linked.name:m.itemId)}</td>
+        <td>${m.q}</td>
+        <td style="font-size:0.78rem;color:#6E8CA0">${esc(m.note||'')}</td>
+      </tr>`;
+    }).join('');
+    return `<div class="set-card" onclick="this.classList.toggle('open')">
+      <div class="set-header">
+        <span class="cell-id">${esc(s.id)}</span>
+        <span class="set-name">${esc(s.name)}</span>
+        <span class="set-badge">${s.members.length}개 품목</span>
+        <button class="btn btn-sm" onclick="event.stopPropagation();openSetModal('${esc(s.id)}')">수정</button>
+        <button class="btn-del" onclick="event.stopPropagation();deleteSet('${esc(s.id)}')">삭제</button>
+      </div>
+      <div class="set-body" onclick="event.stopPropagation()">
+        <table class="mem-tbl"><thead><tr><th>품목ID</th><th>품목명</th><th>수량</th><th>비고</th></tr></thead>
+        <tbody>${memHtml}</tbody></table>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+let setMembers=[];
+function openSetModal(id) {
+  editingSetId=id||null;
+  const s=id?sets.find(x=>x.id===id):null;
+  document.getElementById('set-modal-title').textContent=s?'세트 수정':'세트 추가';
+  document.getElementById('sm-id').value=s?s.id:'';
+  document.getElementById('sm-name').value=s?s.name:'';
+  setMembers=s?s.members.map(m=>({...m})):[];
+  renderSetMembers();
+  document.getElementById('set-modal').classList.add('open');
+}
+
+function renderSetMembers() {
+  const el=document.getElementById('sm-members');
+  el.innerHTML=setMembers.map((m,i)=>`<div style="display:flex;gap:6px;margin-bottom:6px;align-items:center">
+    <select style="flex:2;padding:6px 8px;border:1px solid rgba(0,0,0,0.12);border-radius:5px;background:#fff;color:#1E2D3A;font-size:0.82rem" onchange="setMembers[${i}].itemId=this.value">
+      <option value="">선택...</option>
+      ${items.map(it=>`<option value="${esc(it.id)}"${it.id===m.itemId?' selected':''}>${esc(it.id)} — ${esc(it.name)}</option>`).join('')}
+    </select>
+    <input type="number" style="width:60px;padding:6px 8px;border:1px solid rgba(0,0,0,0.12);border-radius:5px;background:#fff;color:#1E2D3A;font-size:0.82rem" value="${m.q||1}" min="1" onchange="setMembers[${i}].q=Number(this.value)||1" placeholder="수량">
+    <input style="flex:1;padding:6px 8px;border:1px solid rgba(0,0,0,0.12);border-radius:5px;background:#fff;color:#1E2D3A;font-size:0.82rem" value="${esc(m.note||'')}" onchange="setMembers[${i}].note=this.value" placeholder="비고">
+    <button class="btn-del" onclick="setMembers.splice(${i},1);renderSetMembers()">×</button>
+  </div>`).join('');
+}
+
+function addSetMember(){setMembers.push({itemId:'',sort:setMembers.length,q:1,note:''});renderSetMembers();}
+
+async function saveSet() {
+  const data={
+    id:document.getElementById('sm-id').value.trim(),
+    name:document.getElementById('sm-name').value,
+    members:setMembers.map((m,i)=>({itemId:m.itemId,sort:i,q:m.q||1,note:m.note||''})).filter(m=>m.itemId),
+  };
+  if(!data.name){return alert('세트명은 필수입니다.');}
+  try{
+    if(editingSetId) await api('/sets/'+encodeURIComponent(editingSetId),{method:'PUT',body:JSON.stringify(data)});
+    else await api('/sets',{method:'POST',body:JSON.stringify(data)});
+    closeModal('set-modal');
+    await loadAll();
+    toast(editingSetId?'수정 완료':'추가 완료');
+  }catch(e){alert(e.message);}
+}
+
+async function deleteSet(id) {
+  if(!confirm(`"${id}" 세트를 삭제할까요?`)) return;
+  try{ await api('/sets/'+encodeURIComponent(id),{method:'DELETE'}); await loadAll(); toast('삭제 완료'); }
+  catch(e){alert(e.message);}
+}
+
+// ══════════════ SMART GROUPS ══════════════
+
+function renderSmart() {
+  const body=document.getElementById('smart-body');
+  if(!smartGroups.length){body.innerHTML='<div class="empty">스마트그룹이 없습니다</div>';return;}
+  body.innerHTML=smartGroups.sort((a,b)=>(a.sort||0)-(b.sort||0)).map(g=>{
+    const gItems=smartItems.filter(si=>si.group_id===g.id);
+    const total=gItems.reduce((s,it)=>s+(it.price||0)*Math.max(it.qty||1,1),0);
+    const rows=gItems.map(si=>`<tr>
+      <td class="cell-id">${esc(si.item_id||'')}</td>
+      <td>${esc(si.name)}</td>
+      <td>${esc(si.cat||'')}</td>
+      <td>${si.qty||0}</td>
+      <td class="cell-price">${N(si.price||0)}</td>
+    </tr>`).join('');
+    return `<div class="set-card" onclick="this.classList.toggle('open')">
+      <div class="set-header">
+        <span class="cell-id">${esc(g.id)}</span>
+        <span class="set-name">${esc(g.name)}</span>
+        <span class="set-badge">${esc(g.cat||'')} · ${gItems.length}개 · ${N(total)}원</span>
+        <button class="btn btn-sm" onclick="event.stopPropagation();openSmartModal('${esc(g.id)}')">수정</button>
+        <button class="btn-del" onclick="event.stopPropagation();deleteSmartGroup('${esc(g.id)}')">삭제</button>
+      </div>
+      <div class="set-body" onclick="event.stopPropagation()">
+        <table class="mem-tbl"><thead><tr><th>품목ID</th><th>품목명</th><th>소분류</th><th>수량</th><th>단가</th></tr></thead>
+        <tbody>${rows}</tbody></table>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function openSmartModal(id) {
+  editingSmartId=id||null;
+  const g=id?smartGroups.find(x=>x.id===id):null;
+  document.getElementById('smart-modal-title').textContent=g?'스마트그룹 수정':'스마트그룹 추가';
+  document.getElementById('sg-id').value=g?g.id:'';
+  document.getElementById('sg-name').value=g?g.name:'';
+  document.getElementById('sg-cat').value=g?g.cat:'';
+  document.getElementById('sg-sort').value=g?g.sort:0;
+  document.getElementById('smart-modal').classList.add('open');
+}
+
+async function saveSmartGroup() {
+  const data={
+    id:document.getElementById('sg-id').value.trim(),
+    name:document.getElementById('sg-name').value,
+    cat:document.getElementById('sg-cat').value,
+    sort:Number(document.getElementById('sg-sort').value)||0,
+  };
+  if(!data.name){return alert('그룹명은 필수입니다.');}
+  try{
+    if(editingSmartId) await api('/smart-groups/'+encodeURIComponent(editingSmartId),{method:'PUT',body:JSON.stringify(data)});
+    else await api('/smart-groups',{method:'POST',body:JSON.stringify(data)});
+    closeModal('smart-modal');
+    await loadAll();
+    toast(editingSmartId?'수정 완료':'추가 완료');
+  }catch(e){alert(e.message);}
+}
+
+async function deleteSmartGroup(id) {
+  if(!confirm(`"${id}" 스마트그룹을 삭제할까요?\n(포함된 스마트항목도 함께 삭제됩니다)`)) return;
+  try{ await api('/smart-groups/'+encodeURIComponent(id),{method:'DELETE'}); await loadAll(); toast('삭제 완료'); }
+  catch(e){alert(e.message);}
+}
+
+// ══════════════ PURCHASE MAP ══════════════
+
+function renderPurchase() {
+  const q=(document.getElementById('pm-q').value||'').toLowerCase();
+  const list=purchaseMap.filter(p=>!q||p.name.toLowerCase().includes(q)||p.supplier.toLowerCase().includes(q)||p.id.toLowerCase().includes(q));
+  document.getElementById('pm-body').innerHTML=list.map(p=>`<tr>
+    <td class="cell-id">${esc(p.id)}</td>
+    <td>${esc(p.name)}</td>
+    <td>${esc(p.supplier)}</td>
+    <td style="font-size:0.78rem;color:#6E8CA0">${esc(p.note||'')}</td>
+    <td class="cell-actions">
+      <button class="btn btn-sm" onclick="openPmModal('${esc(p.id)}')">수정</button>
+      <button class="btn-del" onclick="deletePm('${esc(p.id)}')">삭제</button>
+    </td>
+  </tr>`).join('') || '<tr><td colspan="5" class="empty">항목이 없습니다</td></tr>';
+}
+
+function openPmModal(id) {
+  editingPmId=id||null;
+  const p=id?purchaseMap.find(x=>x.id===id):null;
+  document.getElementById('pm-modal-title').textContent=p?'구매요청 수정':'구매요청 추가';
+  const sel=document.getElementById('pm-id');
+  sel.innerHTML='<option value="">선택...</option>'+items.map(i=>`<option value="${esc(i.id)}"${p&&p.id===i.id?' selected':''}>${esc(i.id)} — ${esc(i.name)}</option>`).join('');
+  sel.disabled=!!p;
+  if(p)sel.value=p.id;
+  document.getElementById('pm-name').value=p?p.name:'';
+  document.getElementById('pm-supplier').value=p?p.supplier:'';
+  document.getElementById('pm-note').value=p?p.note||'':'';
+  document.getElementById('pm-modal').classList.add('open');
+}
+
+async function savePm() {
+  const data={
+    id:document.getElementById('pm-id').value,
+    name:document.getElementById('pm-name').value,
+    supplier:document.getElementById('pm-supplier').value,
+    note:document.getElementById('pm-note').value,
+  };
+  if(!data.id){return alert('품목ID를 선택하세요.');}
+  try{
+    if(editingPmId) await api('/purchase-map/'+encodeURIComponent(editingPmId),{method:'PUT',body:JSON.stringify(data)});
+    else await api('/purchase-map',{method:'POST',body:JSON.stringify(data)});
+    closeModal('pm-modal');
+    await loadAll();
+    toast(editingPmId?'수정 완료':'추가 완료');
+  }catch(e){alert(e.message);}
+}
+
+async function deletePm(id) {
+  if(!confirm(`"${id}" 구매요청을 삭제할까요?`)) return;
+  try{ await api('/purchase-map/'+encodeURIComponent(id),{method:'DELETE'}); await loadAll(); toast('삭제 완료'); }
+  catch(e){alert(e.message);}
+}
+
+// ══════════════ NOTES ══════════════
+
+function renderNotes() {
+  const body=document.getElementById('notes-body');
+  if(!notesDefault.length){body.innerHTML='<div class="empty">특기사항이 없습니다</div>';return;}
+  body.innerHTML=notesDefault.map((n,i)=>`<div style="display:flex;gap:8px;margin-bottom:6px;align-items:center">
+    <span style="font-size:0.8rem;color:#6E8CA0;width:24px">${i+1}</span>
+    <input style="flex:1;padding:8px 12px;border:1px solid rgba(0,0,0,0.12);border-radius:7px;background:#fff;color:#1E2D3A;font-size:0.85rem" value="${esc(n)}" onchange="notesDefault[${i}]=this.value">
+    <button class="btn-del" onclick="notesDefault.splice(${i},1);renderNotes()">×</button>
+  </div>`).join('');
+}
+
+function addNote(){notesDefault.push('');renderNotes();}
+
+async function saveNotes() {
+  const list=notesDefault.filter(n=>n.trim());
+  try{ await api('/notes',{method:'PUT',body:JSON.stringify(list)}); notesDefault=list; renderNotes(); toast('저장 완료'); }
+  catch(e){alert(e.message);}
+}
+
+// ══════════════ BACKUP ══════════════
+
+async function backup() {
+  try{ const r=await api('/backup',{method:'POST'}); toast('백업 완료: '+r.file); }
+  catch(e){alert(e.message);}
+}
+
+// ── Init ──
+loadAll();
+</script>
+</body>
+</html>

@@ -200,7 +200,6 @@ input::placeholder { color: #6060a0; }
       <div class="done-tab-btns" id="done-tab-btns">
         <button class="done-tab-btn active" data-donetab="daily" onclick="switchDoneTab('daily')">금일 업무</button>
         <button class="done-tab-btn" data-donetab="weekly" onclick="switchDoneTab('weekly')">주간 업무</button>
-        <button class="done-tab-btn" data-donetab="finance" onclick="switchDoneTab('finance')">매출 관리</button>
         <button class="done-tab-btn" data-donetab="sales" onclick="switchDoneTab('sales')">영업 업무</button>
       </div>
       <div id="done-list"></div>
@@ -447,7 +446,7 @@ function addFinance() {
 function renderFinance() {
   const list     = document.getElementById('finance-list');
   const selected = getSelectedMonths('finance');
-  const items    = data.finance.filter(f => selected.includes(f.month) && (f.fstatus || 'discuss') !== 'done');
+  const items    = data.finance.filter(f => selected.includes(f.month));
   if (!items.length) {
     list.innerHTML = '<div class="empty">등록된 항목이 없습니다</div>';
     document.getElementById('finance-total').textContent = '';
@@ -768,30 +767,6 @@ function switchDoneTab(tab) {
 
 function renderDoneList() {
   const list = document.getElementById('done-list');
-  if (doneActiveTab === 'finance') {
-    const items = data.finance.filter(f => (f.fstatus || 'discuss') === 'done');
-    if (!items.length) { list.innerHTML = '<div class="empty">완료된 항목이 없습니다</div>'; return; }
-    const sorted = [...items].sort((a, b) => b.id - a.id);
-    list.innerHTML = sorted.map(f => `
-      <div class="memo-item done-item" data-id="${f.id}">
-        <div class="memo-header" onclick="toggleMemoSimple(this)">
-          <span class="${FINANCE_SCLASS['done']}">${FINANCE_STATUS['done']}</span>
-          <span class="memo-title">${esc(f.name)}</span>
-          <div class="memo-meta">
-            <span class="finance-amount-badge">₩ ${formatAmount(f.amount)}</span>
-            <span class="finance-month-badge">${formatMonth(f.month)}</span>
-          </div>
-        </div>
-        <div class="memo-body">
-          ${f.content ? `<textarea readonly style="opacity:0.7">${esc(f.content)}</textarea>` : ''}
-          <div class="memo-actions" style="margin-top:8px">
-            <span class="done-completed-date">월: ${formatMonth(f.month)}</span>
-          </div>
-        </div>
-      </div>`).join('');
-    return;
-  }
-
   const items = data[doneActiveTab].filter(m => m.status === 'done');
   if (!items.length) { list.innerHTML = '<div class="empty">완료된 업무가 없습니다</div>'; return; }
   const sorted = [...items].sort((a, b) => b.id - a.id);
@@ -820,8 +795,7 @@ function renderDoneList() {
 
 function updateDoneBadge() {
   const fab = document.querySelector('.done-fab');
-  const count = ['daily','weekly','sales'].reduce((s, tab) => s + data[tab].filter(m => m.status === 'done').length, 0)
-    + data.finance.filter(f => (f.fstatus || 'discuss') === 'done').length;
+  const count = ['daily','weekly','sales'].reduce((s, tab) => s + data[tab].filter(m => m.status === 'done').length, 0);
   const existing = fab.querySelector('.badge');
   if (existing) existing.remove();
   if (count > 0) {

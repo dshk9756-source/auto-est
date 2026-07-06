@@ -1,18 +1,11 @@
-{
+﻿{
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "dev",
+      "name": "estimate-server",
       "runtimeExecutable": "node",
       "runtimeArgs": ["server.js"],
-      "port": 5173,
-      "autoPort": true
-    },
-    {
-      "name": "telecom",
-      "runtimeExecutable": "node",
-      "runtimeArgs": ["-e", "require('http').createServer((q,r)=>{const fs=require('fs'),p=require('path'),f=p.join(__dirname,q.url==='/'?'telecom.html':q.url.replace(/^\\//,'')),e=p.extname(f),m={'.html':'text/html','.json':'application/json','.css':'text/css','.js':'text/javascript'};fs.readFile(f,(err,d)=>{if(err){r.writeHead(404);r.end('Not found')}else{r.writeHead(200,{'Content-Type':(m[e]||'application/octet-stream')+';charset=utf-8'});r.end(d)}})}).listen(5175,()=>console.log('Telecom server on 5175'))"],
-      "port": 5175
+      "port": 5173
     }
   ]
 }
