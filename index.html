@@ -129,6 +129,7 @@
       <div class="btn-grid">
         <button class="preview-btn" id="preview-btn" onclick="previewExcel()" disabled>미리보기</button>
         <button class="purchase-btn" id="purchase-btn" onclick="openPurchaseModal()" disabled>구매요청서</button>
+        <button class="statement-btn" id="statement-btn" onclick="openStatementModal()" disabled>거래명세서</button>
         <button class="excel-btn" id="excel-btn" onclick="generateExcel()" disabled>엑셀 다운로드</button>
       </div>
       <div class="autosave-note" id="autosave-note"></div>
@@ -198,6 +199,33 @@
     <div class="pr-footer">
       <div class="pr-count" id="pr-count"></div>
       <button class="excel-btn" id="pr-download-btn" onclick="downloadPurchaseRequest()">구매요청서 다운로드</button>
+    </div>
+  </div>
+</div>
+
+<!-- 거래명세서 모달 -->
+<div class="st-overlay" id="st-overlay" onclick="if(event.target===this)closeStatementModal()">
+  <div class="st-modal" onclick="event.stopPropagation()">
+    <div class="st-header">
+      <div class="st-title">거래명세서 — 거래처 정보</div>
+      <button class="pv-close" onclick="closeStatementModal()">&times;</button>
+    </div>
+    <div class="st-body">
+      <div id="st-match-hint" style="font-size:11px;margin:-4px 0 2px"></div>
+      <div class="fg"><label>상호 (건설사명)</label><input type="text" id="st-name" placeholder="예: (주)대우건설"></div>
+      <div class="st-row">
+        <div class="fg"><label>대표자</label><input type="text" id="st-ceo" placeholder="대표자명"></div>
+        <div class="fg"><label>사업자등록번호</label><input type="text" id="st-bizno" placeholder="000-00-00000"></div>
+      </div>
+      <div class="fg"><label>주소</label><input type="text" id="st-address" placeholder="사업장 주소"></div>
+      <div class="st-row">
+        <div class="fg"><label>업태</label><input type="text" id="st-biztype" placeholder="예: 건설"></div>
+        <div class="fg"><label>종목</label><input type="text" id="st-bizitem" placeholder="예: 토목건축"></div>
+      </div>
+    </div>
+    <div class="st-footer">
+      <button class="pw-btn pw-btn-cancel" onclick="closeStatementModal()">취소</button>
+      <button class="excel-btn" id="st-download-btn" onclick="downloadStatement()" style="margin-top:0;width:auto;padding:9px 20px">거래명세서 다운로드</button>
     </div>
   </div>
 </div>

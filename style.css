@@ -519,8 +519,8 @@ header{
 .markup-opt input[type="checkbox"]{accent-color:var(--pri);width:12px;height:12px}
 
 /* Buttons */
-.btn-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:10px}
-.btn-grid .excel-btn,.btn-grid .preview-btn,.btn-grid .purchase-btn{margin-top:0;width:100%}
+.btn-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-top:10px}
+.btn-grid .excel-btn,.btn-grid .preview-btn,.btn-grid .purchase-btn,.btn-grid .statement-btn{margin-top:0;width:100%}
 .btn-grid .excel-btn{grid-column:1/-1}
 .excel-btn{
   width:100%;margin-top:10px;padding:9px;
@@ -732,6 +732,49 @@ header{
 }
 .purchase-btn:hover{background:var(--ambg);border-color:var(--amber)}
 .purchase-btn:disabled{opacity:.3;cursor:not-allowed}
+
+/* ── 거래명세서 BUTTON ── */
+.statement-btn{
+  width:100%;margin-top:8px;padding:9px;
+  background:transparent;border:1px solid var(--greenbdr);
+  border-radius:var(--r6);color:var(--green);font-size:13px;font-weight:600;
+  cursor:pointer;font-family:var(--body);transition:all .15s;letter-spacing:.02em;
+}
+.statement-btn:hover{background:var(--greenbg);border-color:var(--green)}
+.statement-btn:disabled{opacity:.3;cursor:not-allowed}
+
+/* ── 거래명세서 정보 입력 모달 (구매요청서 모달과 동일 구조 재사용) ── */
+.st-overlay{
+  display:none;position:fixed;inset:0;z-index:9999;
+  background:rgba(0,0,0,.55);backdrop-filter:blur(4px);
+  align-items:center;justify-content:center;
+}
+.st-overlay.open{display:flex}
+.st-modal{
+  width:520px;max-width:92vw;max-height:88vh;
+  background:var(--surface);border-radius:var(--r12);
+  display:flex;flex-direction:column;overflow:hidden;
+  box-shadow:0 24px 64px rgba(0,0,0,.4);
+}
+.st-header{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:16px 20px;border-bottom:1px solid var(--border);flex-shrink:0;
+}
+.st-title{font-size:17px;font-weight:700;color:var(--text)}
+.st-body{flex:1;overflow-y:auto;padding:16px 20px;display:flex;flex-direction:column;gap:12px}
+.st-body .fg label{font-size:11px;font-weight:600;color:var(--text3);letter-spacing:.06em;text-transform:uppercase;display:block;margin-bottom:6px}
+.st-body .fg input{
+  width:100%;padding:9px 10px;background:var(--sf2);
+  border:1px solid var(--border2);border-radius:var(--r6);
+  font-size:13px;color:var(--text);font-family:var(--body);outline:none;transition:border-color .15s;
+}
+.st-body .fg input:focus{border-color:var(--pri);box-shadow:0 0 0 3px var(--pri-bg)}
+.st-row{display:flex;gap:12px}
+.st-row .fg{flex:1}
+.st-footer{
+  display:flex;align-items:center;justify-content:flex-end;gap:8px;
+  padding:14px 20px;border-top:1px solid var(--border);flex-shrink:0;
+}
 .autosave-note{
   font-size:10px;color:var(--text3);text-align:center;margin-top:6px;
   font-family:var(--mono);letter-spacing:.02em;

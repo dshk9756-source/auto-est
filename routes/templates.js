@@ -4,7 +4,7 @@ const path = require('path');
 const router = express.Router();
 
 const ROOT = path.join(__dirname, '..');
-const EXCLUDE = ['구매요청서.xlsx'];
+const EXCLUDE = ['구매요청서.xlsx', '거래명세서.xlsx'];
 
 router.get('/templates', (req, res) => {
   const templateDir = path.join(ROOT, 'template');

@@ -113,6 +113,7 @@ router.get('/catalog', (req, res) => {
       NOTES_DEFAULT: raw.notesDefault || [],
       SMART_GROUPS,
       PURCHASE_MAP,
+      COMPANIES: raw.companies || [],
     });
   } catch (e) {
     console.error('[catalog ERROR]', e.message);
@@ -325,6 +326,57 @@ router.delete('/catalog/purchase-map/:id', (req, res) => {
   const before = cat.purchaseMap.length;
   cat.purchaseMap = cat.purchaseMap.filter(p => p.id !== req.params.id);
   if (cat.purchaseMap.length === before) return res.status(404).json({ error: 'Not found' });
+  writeCatalog(cat);
+  res.json({ ok: true });
+});
+
+// ── CRUD: Companies (건설사 정보 — 거래명세서 자동입력용) ──
+
+router.get('/catalog/companies', (req, res) => {
+  res.json(readCatalog().companies || []);
+});
+
+router.post('/catalog/companies', (req, res) => {
+  const cat = readCatalog();
+  if (!cat.companies) cat.companies = [];
+  const existingIds = new Set(cat.companies.map(c => c.id));
+  const company = {
+    id: cellStr(req.body.id).trim() || genId('거래처-', existingIds),
+    name:    cellStr(req.body.name).trim(),
+    bizNo:   cellStr(req.body.bizNo).trim(),
+    ceo:     cellStr(req.body.ceo).trim(),
+    address: cellStr(req.body.address).trim(),
+    bizType: cellStr(req.body.bizType).trim(),
+    bizItem: cellStr(req.body.bizItem).trim(),
+  };
+  if (!company.name) return res.status(400).json({ error: '건설사명은 필수입니다' });
+  if (existingIds.has(company.id)) return res.status(409).json({ error: 'Duplicate ID' });
+  cat.companies.push(company);
+  writeCatalog(cat);
+  res.status(201).json(company);
+});
+
+router.put('/catalog/companies/:id', (req, res) => {
+  const cat = readCatalog();
+  if (!cat.companies) cat.companies = [];
+  const idx = cat.companies.findIndex(c => c.id === req.params.id);
+  if (idx < 0) return res.status(404).json({ error: 'Not found' });
+  const company = cat.companies[idx];
+  if (req.body.name !== undefined)    company.name    = cellStr(req.body.name).trim();
+  if (req.body.bizNo !== undefined)   company.bizNo   = cellStr(req.body.bizNo).trim();
+  if (req.body.ceo !== undefined)     company.ceo     = cellStr(req.body.ceo).trim();
+  if (req.body.address !== undefined) company.address = cellStr(req.body.address).trim();
+  if (req.body.bizType !== undefined) company.bizType = cellStr(req.body.bizType).trim();
+  if (req.body.bizItem !== undefined) company.bizItem = cellStr(req.body.bizItem).trim();
+  writeCatalog(cat);
+  res.json(company);
+});
+
+router.delete('/catalog/companies/:id', (req, res) => {
+  const cat = readCatalog();
+  const before = (cat.companies || []).length;
+  cat.companies = (cat.companies || []).filter(c => c.id !== req.params.id);
+  if (cat.companies.length === before) return res.status(404).json({ error: 'Not found' });
   writeCatalog(cat);
   res.json({ ok: true });
 });

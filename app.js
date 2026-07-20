@@ -122,6 +122,7 @@ function formatPhone(el){
 let NOTES_DEFAULT = [];
 let SMART_GROUPS = [];
 let PURCHASE_MAP = {};
+let COMPANIES = [];
 let catalogMode = 'normal';
 
 function showCatalogErr(msg) {
@@ -161,6 +162,7 @@ async function loadCatalog() {
     NOTES_DEFAULT = data.NOTES_DEFAULT || [];
     SMART_GROUPS = data.SMART_GROUPS || [];
     PURCHASE_MAP = data.PURCHASE_MAP || {};
+    COMPANIES = data.COMPANIES || [];
     if (!SETS.length && !ITEMS.length) {
       showCatalogErr("세트/단품 데이터가 비어 있습니다.");
     }
@@ -343,6 +345,7 @@ function renderCart(){
     const excelBtnE=document.getElementById('excel-btn');if(excelBtnE)excelBtnE.disabled=true;
     const pvBtnE=document.getElementById('preview-btn');if(pvBtnE)pvBtnE.disabled=true;
     const prBtnE=document.getElementById('purchase-btn');if(prBtnE)prBtnE.disabled=true;
+    const stBtnE=document.getElementById('statement-btn');if(stBtnE)stBtnE.disabled=true;
     const mkRowE=document.getElementById('markup-row');if(mkRowE)mkRowE.style.display='none';
     const ssBtn=document.getElementById('rp-save-set');if(ssBtn)ssBtn.style.display='none';
     return;
@@ -407,6 +410,8 @@ function renderCart(){
   if(pvBtn)pvBtn.disabled=false;
   const prBtn=document.getElementById('purchase-btn');
   if(prBtn)prBtn.disabled=false;
+  const stBtn=document.getElementById('statement-btn');
+  if(stBtn)stBtn.disabled=false;
   const mkRow=document.getElementById('markup-row');
   if(mkRow)mkRow.style.display='';
   const ssBtn=document.getElementById('rp-save-set');
@@ -771,12 +776,12 @@ function _buildPayload(src){
           const grp=c.name||'';
           return c.members.map((m,i)=>({type:'item',itemId:m.itemId||'',name:m.n||'',cat:m.cat||'',
             group:grp,qty:(m.q||1)*mult,effectiveP:effectiveMemberPrice(c,i),
-            unit:m.u||'EA',spec:m.spec||'',note:m.note||''}));
+            unit:m.u||'EA',spec:m.spec||'',note:m.note||'',isSet:true}));
         }
         if(c.type==='smart_group') return{type:'smart_group',name:c.name,cat:c.cat,
           group:c.name||c.cat||'',items:c.items.map(it=>({...it})),totalPrice:c.totalPrice||0};
         return{type:'item',itemId:id,name:c.name,cat:c.cat,group:c.cat||'',qty:c.qty||1,
-          effectiveP:effectiveItemPrice(c),unit:c.unit||'식',spec:c.spec||'',note:c.note||''};
+          effectiveP:effectiveItemPrice(c),unit:c.unit||'식',spec:c.spec||'',note:c.note||'',isSet:false};
       }).flat();
       const merged=[];
       for(const it of raw){
@@ -787,10 +792,14 @@ function _buildPayload(src){
           if(it.effectiveP>dup.effectiveP) dup.effectiveP=it.effectiveP;
         }else merged.push(it);
       }
-      merged.sort((a,b)=>{
-        const ga=a.group||a.cat||''; const gb=b.group||b.cat||'';
-        return ga<gb?-1:ga>gb?1:0;
+      // 그룹(카테고리)별로 묶되, 그룹 순서는 알파벳순이 아니라
+      // 실제 클릭(추가)한 순서, 즉 카트에 처음 등장한 순서를 따른다.
+      const groupOrder=new Map();
+      merged.forEach(it=>{
+        const g=it.group||it.cat||'';
+        if(!groupOrder.has(g)) groupOrder.set(g,groupOrder.size);
       });
+      merged.sort((a,b)=>groupOrder.get(a.group||a.cat||'')-groupOrder.get(b.group||b.cat||''));
       return merged;
     })()
   };
@@ -1435,4 +1444,82 @@ function openPurchaseFromHist(id) {
   const q = loadHistory().find(x => x.id === id);
   if (!q) return;
   openPurchaseModal(q);
+}
+
+/* ────────────────────────────────────────────────
+   거래명세서
+──────────────────────────────────────────────── */
+function normalizeCompanyName(s) {
+  return (s || '').replace(/\(주\)|㈜|주식회사|\s+/g, '').trim();
+}
+function findCompanyByName(name) {
+  const q = normalizeCompanyName(name);
+  if (!q) return null;
+  return COMPANIES.find(c => normalizeCompanyName(c.name) === q) || null;
+}
+
+function openStatementModal() {
+  const companyName = document.getElementById('f-company').value || '';
+  const matched = findCompanyByName(companyName);
+
+  document.getElementById('st-name').value = matched ? matched.name : companyName;
+  document.getElementById('st-ceo').value = matched ? (matched.ceo || '') : '';
+  document.getElementById('st-bizno').value = matched ? (matched.bizNo || '') : '';
+  document.getElementById('st-address').value = matched ? (matched.address || '') : '';
+  document.getElementById('st-biztype').value = matched ? (matched.bizType || '') : '';
+  document.getElementById('st-bizitem').value = matched ? (matched.bizItem || '') : '';
+
+  const hint = document.getElementById('st-match-hint');
+  if (hint) {
+    hint.textContent = matched
+      ? '✓ 카탈로그에 등록된 거래처 정보를 자동으로 불러왔습니다.'
+      : (companyName ? '카탈로그에 "' + companyName + '" 건설사 정보가 없습니다. 직접 입력하거나 카탈로그 관리에서 등록해주세요.' : '');
+    hint.style.color = matched ? 'var(--green)' : 'var(--amber)';
+  }
+
+  document.getElementById('st-overlay').classList.add('open');
+}
+
+function closeStatementModal() {
+  document.getElementById('st-overlay').classList.remove('open');
+}
+
+async function downloadStatement() {
+  const btn = document.getElementById('st-download-btn');
+  const orig = btn.textContent;
+  btn.textContent = '생성 중…'; btn.disabled = true;
+
+  const p = _buildPayload();
+  const payload = {
+    ...p,
+    buyer: {
+      name:    document.getElementById('st-name').value || '',
+      ceo:     document.getElementById('st-ceo').value || '',
+      bizNo:   document.getElementById('st-bizno').value || '',
+      address: document.getElementById('st-address').value || '',
+      bizType: document.getElementById('st-biztype').value || '',
+      bizItem: document.getElementById('st-bizitem').value || '',
+    },
+  };
+
+  try {
+    const resp = await fetch('/api/generate-statement', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (!resp.ok) { const e = await resp.json().catch(() => ({ error: '서버 오류' })); throw new Error(e.error); }
+    const blob = await resp.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    const ds = (p.date || '').replace(/-/g, '').slice(2);
+    a.href = url; a.download = `거래명세서_${p.client}_${ds}.xlsx`;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
+    autoSaveQuote('거래명세서');
+    btn.textContent = '✓ 완료';
+    setTimeout(() => { btn.textContent = orig; btn.disabled = false; closeStatementModal(); }, 1200);
+  } catch (e) {
+    alert('오류: ' + e.message);
+    btn.textContent = orig; btn.disabled = false;
+  }
 }

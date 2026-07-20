@@ -76,6 +76,9 @@ app.delete('/api/catalog/smart-groups/:id', requireAdmin);
 app.post('/api/catalog/purchase-map', requireAdmin);
 app.put('/api/catalog/purchase-map/:id', requireAdmin);
 app.delete('/api/catalog/purchase-map/:id', requireAdmin);
+app.post('/api/catalog/companies', requireAdmin);
+app.put('/api/catalog/companies/:id', requireAdmin);
+app.delete('/api/catalog/companies/:id', requireAdmin);
 app.put('/api/catalog/notes', requireAdmin);
 app.post('/api/catalog/backup', requireAdmin);
 

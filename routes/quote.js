@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { generateQuote, generateSmartQuote, extractPreviewData, generatePurchaseRequest } = require('../generate_quote');
+const { generateStatement } = require('../generate_statement');
 
 router.post('/generate-excel', async (req, res) => {
   try {
@@ -51,6 +52,25 @@ router.post('/generate-purchase-request', async (req, res) => {
     res.end(buffer);
   } catch (e) {
     console.error('[purchase-request ERROR]', e.message, e.stack);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.post('/generate-statement', async (req, res) => {
+  try {
+    const data = req.body;
+    const buffer = await generateStatement(data);
+    const fname = encodeURIComponent(
+      `거래명세서_${data.client || 'OPENWORKS'}_${data.date || ''}.xlsx`
+    );
+    res.set({
+      'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'Content-Disposition': `attachment; filename*=UTF-8''${fname}`,
+      'Content-Length': buffer.length,
+    });
+    res.end(buffer);
+  } catch (e) {
+    console.error('[generate-statement ERROR]', e.message, e.stack);
     res.status(500).json({ error: e.message });
   }
 });
